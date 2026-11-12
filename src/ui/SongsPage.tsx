@@ -6,6 +6,25 @@ import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 
+const MIME: Record<string, string> = {
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', '3gp': 'video/3gpp',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
+};
+
+/** Blob com tipo explícito: o Android às vezes entrega arquivos sem tipo, e o <video> recusa. */
+function typed(blob: Blob, name: string, declared: string): Blob {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const type = blob.type || declared || MIME[ext] || '';
+  return type && type !== blob.type ? new Blob([blob], { type }) : blob;
+}
+
+const MEDIA_ERRORS: Record<number, string> = {
+  1: 'a reprodução foi interrompida',
+  2: 'erro de rede ao ler o arquivo',
+  3: 'o vídeo está corrompido ou usa um formato que o celular não decodifica',
+  4: 'o celular não consegue tocar este formato de vídeo (ex.: HEVC/H.265, MKV)',
+};
+
 type Status = 'idle' | 'decoding' | 'analyzing' | 'ready' | 'error';
 
 /** Mantém a lista ordenada e sem sobreposição de tempos. */
@@ -27,6 +46,7 @@ export function SongsPage() {
   const [cur, setCur] = useState(-1);
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState(true);
+  const [mediaErr, setMediaErr] = useState('');
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<number>(0);
@@ -99,10 +119,13 @@ export function SongsPage() {
       id: newId(), name: f.name.replace(/\.[^.]+$/, ''), size: f.size, type: f.type,
       createdAt: Date.now(), updatedAt: Date.now(), raw: [], events: [], cleanLevel: 'medio',
     };
-    setUrl(URL.createObjectURL(f));
+    base.type = f.type || MIME[f.name.split('.').pop()?.toLowerCase() ?? ''] || '';
+    const blob = typed(f, f.name, f.type);
+    setMediaErr('');
+    setUrl(URL.createObjectURL(blob));
     setSong(base);
     setCur(-1);
-    void runAnalysis(f, base, 'medio');
+    void runAnalysis(blob, base, 'medio');
   };
 
   const open = async (meta: SongMeta) => {
@@ -112,10 +135,22 @@ export function SongsPage() {
       return;
     }
     setError('');
-    setUrl(URL.createObjectURL(blob));
+    setMediaErr('');
+    setUrl(URL.createObjectURL(typed(blob, meta.name, meta.type)));
     setSong(meta);
     setSaved(true);
     setStatus('ready');
+  };
+
+  /** Plano B: copia o arquivo para a memória e recria o endereço do vídeo. */
+  const reloadVideo = async () => {
+    if (!song) return;
+    const stored = await getBlob(song.id);
+    if (!stored) return;
+    const copy = typed(new Blob([await stored.arrayBuffer()], { type: stored.type }), song.name, song.type);
+    if (url) URL.revokeObjectURL(url);
+    setMediaErr('');
+    setUrl(URL.createObjectURL(copy));
   };
 
   const update = (next: ChordEvent[]) => {
@@ -228,7 +263,25 @@ export function SongsPage() {
         )
       ) : (
         <div className="song">
-          <video ref={video} src={url} controls playsInline className="video" />
+          <video
+            ref={video}
+            src={url}
+            controls
+            playsInline
+            preload="auto"
+            className="video"
+            onError={(e) => {
+              const code = e.currentTarget.error?.code ?? 0;
+              setMediaErr(`Erro ${code}: ${MEDIA_ERRORS[code] ?? 'falha desconhecida'}.`);
+            }}
+          />
+          {mediaErr && (
+            <div className="progress-card">
+              <p className="error">O vídeo não tocou. {mediaErr}</p>
+              <p className="muted small">Os acordes continuam valendo. Se o formato não é suportado, converta o vídeo para MP4 (H.264) e carregue de novo.</p>
+              <button className="chip" onClick={() => void reloadVideo()}>Tentar de novo</button>
+            </div>
+          )}
 
           {(status === 'decoding' || status === 'analyzing') && (
             <div className="progress-card">
