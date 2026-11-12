@@ -80,6 +80,10 @@ export interface Scene {
   strums: number[];
   flashes: Flash[];
   particles: Particle[];
+  /** Texto do último julgamento ("PERFEITO!", "ERROU"…), sobe e some. */
+  popup?: { text: string; color: string; at: number };
+  /** Instante do último erro: a linha de acerto pisca em vermelho. */
+  missAt?: number;
 }
 
 const hue = (root: number) => root * 30;
@@ -154,6 +158,19 @@ function nameSprite(name: string, root: number): Sprite {
     c.shadowBlur = 0;
     c.fillStyle = '#fff';
     c.fillText(name, 210, 50);
+  });
+}
+
+function popupSprite(text: string, color: string): Sprite {
+  return sprite(`pop:${text}:${color}`, 520, 110, (c) => {
+    c.font = '900 italic 72px system-ui, sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.lineWidth = 12;
+    c.strokeStyle = 'rgba(0,0,0,0.9)';
+    c.strokeText(text, 260, 56);
+    c.fillStyle = color;
+    c.fillText(text, 260, 56);
   });
 }
 
@@ -342,6 +359,25 @@ export function drawHighway(ctx: CanvasRenderingContext2D, g: Geometry, sc: Scen
       ctx.lineWidth = 3 * p + 0.5;
       ctx.stroke();
     }
+  }
+
+  // ---- erro: a linha de acerto pisca em vermelho
+  if (sc.missAt !== undefined && sc.now - sc.missAt < 0.35) {
+    ctx.globalAlpha = 0.55 * (1 - (sc.now - sc.missAt) / 0.35);
+    ctx.fillStyle = '#ff2d3d';
+    ctx.fillRect(edge(1, -1), g.strikeY - g.gemR * 0.9, widthAt(g, 1), g.gemR * 1.8);
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- julgamento: texto que sobe e some acima da linha
+  if (sc.popup && sc.now - sc.popup.at < 0.8) {
+    const p = (sc.now - sc.popup.at) / 0.8;
+    const sp = popupSprite(sc.popup.text, sc.popup.color);
+    const ph = g.gemR * 1.5 * (p < 0.15 ? 0.7 + (p / 0.15) * 0.45 : 1.15 - (p - 0.15) * 0.18);
+    const pw = (sp.width * ph) / sp.height;
+    ctx.globalAlpha = p < 0.6 ? 1 : 1 - (p - 0.6) / 0.4;
+    ctx.drawImage(sp, cx - pw / 2, g.strikeY - g.gemR * 2.4 - ph / 2 - p * g.gemR * 1.4, pw, ph);
+    ctx.globalAlpha = 1;
   }
 
   // ---- faíscas
