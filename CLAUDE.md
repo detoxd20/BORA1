@@ -62,6 +62,8 @@ ACORDES DA MÚSICA (não é detecção aberta). `ScoreEngine`: acerto = acorde e
 pode adiantar 250 ms; bônus por sustentar; sequência e multiplicador (×2 a cada 6, máx. ×4); estrelas por % de acerto; `seek()` para pulo/reinício. Tempo do som = relógio do jogo − idade do quadro − `latencyMs`
 (localStorage `cavaco:latencyMs`, padrão 120, ajustável no menu de pausa; Bluetooth pede 200–300). Tela: "🎤 TOCAR VALENDO" / "SÓ ASSISTIR", placar, sequência, "ouvindo X", PERFEITO!/BOM!/ATRASADO/ERROU na
 pista, resultado final e recorde em `SongMeta.best`. Teste ponta a ponta no Chromium com microfone falso tocando os acordes: 7 perfeito + 2 bom, 0 erro; microfone em silêncio: 9 erros, 0 pontos.
+Filtros do microfone (NÃO existe filtro "só cavaco"; o dono perguntou): o worklet escuta só 270–2400 Hz (a corda mais grave é Ré4 = 293,66 Hz), e o limite de volume vem do ruído do ambiente medido
+na contagem 3-2-1 (`gateFromNoise`: 20º percentil + 10 dB, entre −58 e −32 dBFS). Voz, outro instrumento e o som do vídeo AINDA podem contar como acerto se parecerem o acorde esperado.
 NÃO testado com cavaquinho real nem em Android. Limites: sem fones o mic ouve o vídeo (acerto falso); o padrão de latência é um palpite; falta calibração automática de latência e calibração de ruído do ambiente.
 UM SÓ PLAYER (regra): Android limita decodificadores de vídeo simultâneos. O <video> da tela da música é o ÚNICO: no jogo ele vira o fundo (classe `game-bg`, fixed, z-39; `GameScreen` recebe a ref
 `media` e só escuta eventos) e a leitura de acordes usa o mesmo elemento (`acquire()` em `ocr.ts`, restaura a posição). Nunca criar outro <video> com o arquivo. Falha de player aparece dentro do jogo

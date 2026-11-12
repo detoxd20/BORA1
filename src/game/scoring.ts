@@ -124,6 +124,15 @@ export class ScoreEngine {
     this.s = { score: 0, combo: 0, maxCombo: 0, multiplier: 1, counts: { perfeito: 0, bom: 0, ok: 0, erro: 0 }, judged: 0, total: targets.length, accuracy: 0, stars: 0 };
   }
 
+  /** Ajusta o limite de volume (portão de ruído), em dBFS. */
+  setGate(db: number): void {
+    this.opts = { ...this.opts, gateDb: db };
+  }
+
+  get gateDb(): number {
+    return this.opts.gateDb;
+  }
+
   get summary(): ScoreSummary {
     return { ...this.s, counts: { ...this.s.counts } };
   }
@@ -226,4 +235,16 @@ export class ScoreEngine {
     }
     return out;
   }
+}
+
+/**
+ * Limite de volume a partir do ruído do ambiente (níveis em dBFS medidos antes de tocar).
+ * Usa o 20º percentil — se o jogador já estiver dedilhando durante a medição, isso não infla o resultado —
+ * e fica 10 dB acima dele, sempre entre −58 e −32 dBFS.
+ */
+export function gateFromNoise(levelsDb: number[]): number {
+  if (levelsDb.length < 5) return DEFAULT_SCORE.gateDb;
+  const s = [...levelsDb].sort((a, b) => a - b);
+  const floor = s[Math.floor(s.length * 0.2)] as number;
+  return Math.min(-32, Math.max(-58, floor + 10));
 }

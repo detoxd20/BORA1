@@ -20,7 +20,9 @@ class ChromaProcessor extends AudioWorkletProcessor {
   private pos = 0;
   private filled = 0;
   private since = 0;
-  private ex = new ChromaExtractor({ sampleRate, fftSize: FFT });
+  // Só a faixa do cavaquinho: a corda mais grave é o Ré4 (293,66 Hz). Abaixo de ~270 Hz só há voz grave,
+  // zumbido e ruído — nada que o instrumento produza. (270 e não 293 para tolerar corda um pouco baixa.)
+  private ex = new ChromaExtractor({ sampleRate, fftSize: FFT, minFreq: 270, maxFreq: 2400 });
 
   process(inputs: Float32Array[][]): boolean {
     const input = inputs[0]?.[0];
