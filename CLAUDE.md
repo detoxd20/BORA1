@@ -9,7 +9,7 @@ Os acordes/tempos são detectados AUTOMATICAMENTE no áudio de vídeos de aulas 
 Limite técnico: o YouTube não expõe áudio/frames do iframe e não há backend → a análise roda sobre ARQUIVO de vídeo/áudio do próprio
 usuário, carregado no aparelho (decodeAudioData offline). Não construir baixador de YouTube. O afinador fica por ÚLTIMO.
 
-Ordem: (1) motor de acordes ✅ chroma+modelos+Viterbi offline · (2) detector ao vivo (AudioWorklet) · (3) player de vídeo + editor de
+Ordem: (1) motor de acordes ✅ · (1b) carregar arquivo + análise automática + lista editável ✅ (aba Músicas é a tela inicial) · (2) detector ao vivo (AudioWorklet) · (3) editor de
 linha do tempo (ajuste fino) · (4) pista estilo Guitar Hero + pontuação/timing + calibração de latência · (5) biblioteca/PWA ·
 (6) batidas · (7) afinador (feito na v0.1, polir por último). Fones são recomendados: o som do vídeo vaza no microfone.
 
