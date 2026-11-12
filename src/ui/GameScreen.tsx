@@ -8,8 +8,11 @@ import { useWakeLock } from './useWakeLock';
 
 interface Props {
   song: SongMeta;
-  url: string;
-  audioOnly: boolean;
+  /** O MESMO player da tela da música (um só vídeo aberto: Android limita decodificadores simultâneos). */
+  media: React.RefObject<HTMLMediaElement | null>;
+  /** Mensagem de falha do player, se houver. */
+  problem: string;
+  onAudioOnly?: () => void;
   onClose: () => void;
 }
 
@@ -18,7 +21,7 @@ const LOOKAHEAD = 5;
 const HIT_FRAC = 0.8;
 const RATES = [0.5, 0.75, 1];
 
-export function GameScreen({ song, url, audioOnly, onClose }: Props) {
+export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props) {
   const events = useMemo(() => [...song.events].sort((a, b) => a.start - b.start), [song.events]);
   const onsets = useMemo(() => song.onsets ?? [], [song.onsets]);
   const maxStrength = useMemo(() => Math.max(1e-6, ...onsets.map((o) => o.strength)), [onsets]);
@@ -28,7 +31,6 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
   const fretsOf = (root: number, typeId: string) => prefs[shapeKey(root, typeId)];
   useWakeLock(true);
 
-  const media = useRef<HTMLMediaElement>(null);
   const lane = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const slider = useRef<HTMLInputElement>(null);
@@ -88,7 +90,24 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [events]);
 
-  useEffect(() => () => media.current?.pause(), []);
+  // Acompanha o player compartilhado
+  useEffect(() => {
+    const m = media.current;
+    if (!m) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setEnded(true);
+    m.addEventListener('play', onPlay);
+    m.addEventListener('pause', onPause);
+    m.addEventListener('ended', onEnded);
+    return () => {
+      m.removeEventListener('play', onPlay);
+      m.removeEventListener('pause', onPause);
+      m.removeEventListener('ended', onEnded);
+      m.pause();
+      m.playbackRate = 1;
+    };
+  }, [media]);
 
   const start = () => {
     const m = media.current;
@@ -129,18 +148,8 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
 
   const now = cur >= 0 ? events[cur] : undefined;
   const next = events[cur >= 0 ? cur + 1 : 0];
-  const mediaProps = {
-    ref: media as never,
-    src: url,
-    preload: 'auto' as const,
-    onPlay: () => setPlaying(true),
-    onPause: () => setPlaying(false),
-    onEnded: () => setEnded(true),
-  };
-
   return (
     <div className="game" role="dialog" aria-label="Modo jogo">
-      {audioOnly ? <audio {...mediaProps} /> : <video {...mediaProps} className="game-video" playsInline />}
       <div className="game-shade" />
 
       <div className="game-top">
@@ -230,7 +239,17 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
         </div>
       </div>
 
-      {!started && (
+      {problem && (
+        <div className="game-overlay">
+          <div className="overlay-card">
+            <h2>O vídeo não tocou</h2>
+            <pre className="diag">{problem}</pre>
+            {onAudioOnly && <button className="btn primary" onClick={onAudioOnly}>Jogar só com o áudio</button>}
+            <button className="btn" onClick={onClose}>Sair</button>
+          </div>
+        </div>
+      )}
+      {!started && !problem && (
         <div className="game-overlay">
           <div className="overlay-card">
             <h2>{song.name}</h2>

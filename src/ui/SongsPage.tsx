@@ -251,7 +251,7 @@ export function SongsPage() {
       setStage('find');
       setStatus('ocr');
       setProgress(0);
-      const region = await findChordRegion(url, { onProgress: setProgress });
+      const region = await findChordRegion((video.current as HTMLVideoElement | null) ?? url, { onProgress: setProgress });
       if (!region) {
         setStatus('ready');
         setOcrNote('Não consegui achar sozinho onde os acordes aparecem. Marque a região na tela.');
@@ -277,7 +277,7 @@ export function SongsPage() {
       setStage('read');
       setStatus('ocr');
       setProgress(0);
-      const obs = await scanChords(url, region, { onProgress: setProgress });
+      const obs = await scanChords((video.current as HTMLVideoElement | null) ?? url, region, { onProgress: setProgress });
       const vocab = buildVocabulary(obs, { step: SCAN_STEP });
       if (vocab.length === 0) {
         setStatus('ready');
@@ -500,10 +500,10 @@ export function SongsPage() {
             <video
               ref={video as never}
               src={url}
-              controls
+              controls={!gaming}
               playsInline
               preload="auto"
-              className="video"
+              className={gaming ? 'video game-bg' : 'video'}
               onLoadedData={() => {
                 loadedRef.current = true;
                 setMediaErr('');
@@ -679,7 +679,8 @@ export function SongsPage() {
         />
       )}
 
-      {gaming && song && <GameScreen song={song} url={url} audioOnly={audioOnly} onClose={() => setGaming(false)} />}
+      {gaming && <div className="game-backdrop" />}
+      {gaming && song && <GameScreen key={audioOnly ? "a" : "v"} song={song} media={video} problem={mediaErr} onAudioOnly={audioOnly ? undefined : () => { setMediaErr(''); setAudioOnly(true); }} onClose={() => setGaming(false)} />}
 
       {picking && video.current && (
         <RegionPicker video={video.current as HTMLVideoElement} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />

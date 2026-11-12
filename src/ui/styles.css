@@ -209,10 +209,12 @@ input[type=range] { width: 100%; height: 40px; accent-color: var(--accent); }
 .audio-only { height: 54px; }
 
 /* ===== Modo jogo ===== */
-.game { position: fixed; inset: 0; z-index: 40; background: #05070a; display: flex; flex-direction: column; overflow: hidden; touch-action: manipulation; }
-.game-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.game { position: fixed; inset: 0; z-index: 40; background: transparent; display: flex; flex-direction: column; overflow: hidden; touch-action: manipulation; }
+.game-backdrop { position: fixed; inset: 0; z-index: 38; background: #05070a; }
+.video.game-bg { position: fixed; inset: 0; width: 100%; height: 100%; max-height: none; object-fit: cover; border-radius: 0; z-index: 39; }
+audio.game-bg { display: none; }
 .game-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,7,10,.78) 0%, rgba(5,7,10,.22) 36%, rgba(5,7,10,.58) 100%); pointer-events: none; }
-.game > *:not(.game-video):not(.game-shade) { position: relative; z-index: 1; }
+.game > *:not(.game-shade) { position: relative; z-index: 1; }
 .game-top { display: grid; grid-template-columns: 48px 1fr 64px; align-items: center; gap: 8px; padding: max(8px, env(safe-area-inset-top)) 10px 0; }
 .game-x, .game-rate { height: 44px; border-radius: 14px; background: rgba(20,24,29,.8); border: 1px solid var(--line); font-weight: 700; }
 .game-title { text-align: center; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
