@@ -4,7 +4,7 @@ import { cleanEvents, CLEAN_LEVELS, type CleanLevel } from '../chords/analyzer';
 import { deleteSong, getBlob, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
 import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
-import { DEFAULT_REGION, SCAN_STEP, scanChords, type Region } from '../songs/ocr';
+import { DEFAULT_REGION, SCAN_STEP, findChordRegion, scanChords, type Region } from '../songs/ocr';
 import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } from '../songs/vocabulary';
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
@@ -54,6 +54,7 @@ export function SongsPage() {
   const [follow, setFollow] = useState(true);
   const [picking, setPicking] = useState(false);
   const [vocabEdit, setVocabEdit] = useState(false);
+  const [stage, setStage] = useState<'find' | 'read'>('read');
   const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -180,15 +181,41 @@ export function SongsPage() {
     setStatus('ready');
   };
 
-  /** Lê os acordes escritos no vídeo e refaz a análise de áudio só entre eles. */
-  const readFromVideo = async (region: Region) => {
+  /** Um toque: acha sozinho onde ficam os acordes, lê o vídeo todo e concilia com o áudio. */
+  const autoRead = async () => {
     if (!song) return;
-    setPicking(false);
     if (song.edited && !window.confirm('Isso refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
     video.current?.pause();
     setError('');
     setOcrNote('');
     try {
+      setStage('find');
+      setStatus('ocr');
+      setProgress(0);
+      const region = await findChordRegion(url, { onProgress: setProgress });
+      if (!region) {
+        setStatus('ready');
+        setOcrNote('Não consegui achar sozinho onde os acordes aparecem. Marque a região na tela.');
+        setPicking(true);
+        return;
+      }
+      await readFromVideo(region, true);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Não consegui ler os acordes do vídeo.');
+      setStatus('ready');
+    }
+  };
+
+  /** Lê os acordes escritos no vídeo e refaz a análise de áudio só entre eles. */
+  const readFromVideo = async (region: Region, auto = false) => {
+    if (!song) return;
+    setPicking(false);
+    if (!auto && song.edited && !window.confirm('Isso refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
+    video.current?.pause();
+    setError('');
+    setOcrNote('');
+    try {
+      setStage('read');
       setStatus('ocr');
       setProgress(0);
       const obs = await scanChords(url, region, { onProgress: setProgress });
@@ -201,7 +228,7 @@ export function SongsPage() {
       const oneAtATime = chordsPerFrame(obs) <= 1;
       await analyzeWithVocab(
         song, vocab, region, oneAtATime,
-        `${oneAtATime ? 'O vídeo mostra um acorde por vez.' : 'O vídeo mostra uma lista de acordes.'} Onde a faixa não aparece no começo e no fim, nenhum acorde é aceito. Faltou ou sobrou acorde? Toque em "Acordes do vídeo" para corrigir a lista.`,
+        `${auto ? 'Achei a faixa de acordes sozinho (se estiver errada, toque em Ajustar região). ' : ''}${oneAtATime ? 'O vídeo mostra um acorde por vez.' : 'O vídeo mostra uma lista de acordes.'} Onde a faixa não aparece no começo e no fim, nenhum acorde é aceito. Faltou ou sobrou acorde? Toque em "Acordes do vídeo" para corrigir a lista.`,
       );
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : 'Não consegui ler os acordes do vídeo.');
@@ -372,7 +399,7 @@ export function SongsPage() {
           {(status === 'decoding' || status === 'analyzing' || status === 'ocr') && (
             <div className="progress-card">
               <div className="dbg-row">
-                <span>{status === 'decoding' ? 'Lendo o áudio…' : status === 'ocr' ? 'Lendo os acordes escritos no vídeo…' : 'Descobrindo os acordes…'}</span>
+                <span>{status === 'decoding' ? 'Lendo o áudio…' : status === 'ocr' ? (stage === 'find' ? 'Procurando onde os acordes aparecem…' : 'Lendo os acordes escritos no vídeo…') : 'Descobrindo os acordes…'}</span>
                 <b>{status !== 'decoding' ? `${Math.round(progress * 100)}%` : ''}</b>
               </div>
               <div className="level"><div className="level-bar" style={{ width: `${status === 'decoding' ? 5 : progress * 100}%` }} /></div>
@@ -439,8 +466,11 @@ export function SongsPage() {
                 >
                   ✂ Apagar depois daqui
                 </button>
-                <button className="chip accent" onClick={() => { video.current?.pause(); setPicking(true); }}>
+                <button className="chip accent" onClick={() => void autoRead()}>
                   Ler acordes do vídeo
+                </button>
+                <button className="chip" onClick={() => { video.current?.pause(); setPicking(true); }}>
+                  Ajustar região
                 </button>
                 <button
                   className="chip"

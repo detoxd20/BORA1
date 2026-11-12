@@ -17,7 +17,9 @@ linha do tempo (ajuste fino) · (4) pista estilo Guitar Hero + pontuação/timin
 Usuário marca o retângulo dos nomes (ex.: faixa superior da aula "Cacinho do cavaco"); OCR local (tesseract.js, ~15 MB em `public/ocr/`,
 copiado por `scripts/copy-ocr.mjs` no predev/prebuild, fora do precache) lê 1 quadro/s → `Observation[]` → `buildVocabulary` (trechos, confirma
 2 leituras iguais) → `analyzeChords({vocabulary})` restringe o Viterbi a esses acordes (fora da lista = "sem acorde").
-Seletor de região: tela cheia, 8 alças (cantos+lados, escolhe a mais próxima), mover, deslizador de tempo e leitura ao vivo. OCR em psm 11 (texto
+Região automática (padrão): `findChordRegion` lê o quadro inteiro em ~20 instantes (OCR com bbox), `pickRegion` vota onde palavras-acorde aparecem sempre no mesmo lugar
+→ faixa fina na vertical, largura toda na horizontal. Sem achar → abre o seletor manual. "Ajustar região" continua disponível.
+Seletor de região manual: tela cheia, 8 alças (cantos+lados, escolhe a mais próxima), mover, deslizador de tempo e leitura ao vivo. OCR em psm 11 (texto
 esparso), 3 ampliações por quadro (64/128/256 px) e votação temporal (janela de 3). Fora da faixa no começo/fim do vídeo = fala → nenhum acorde;
 lacuna curta no meio = vale o áudio; lista com ≥3 acordes = restrição forte; 1–2 acordes na tela = dica suave (áudio claro pode discordar).
 Modo "um acorde por vez" detectado automaticamente (mediana ≤1 acorde/leitura) + `fillFromVideo`. `VocabEditor`: remover falsos/adicionar faltantes.
