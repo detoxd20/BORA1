@@ -105,3 +105,19 @@ export function moveEnd(events: ChordEvent[], index: number, t: number): ChordEv
   if (n && (Math.abs(n.start - target.end) < 0.3 || n.start < nt)) n.start = nt;
   return out;
 }
+
+/**
+ * Remove acordes muito curtos (detecções falsas: batida na troca, nota solta). O tempo de cada um passa
+ * para o acorde anterior (ou o próximo, se for o primeiro), sem deixar buraco. Devolve também quantos saíram.
+ */
+export function dropShort(events: ChordEvent[], minDur: number): { events: ChordEvent[]; removed: number } {
+  let out = [...events].sort((a, b) => a.start - b.start);
+  let removed = 0;
+  for (;;) {
+    const i = out.findIndex((e) => e.end - e.start < minDur);
+    if (i < 0 || out.length <= 1) break;
+    out = removeChord(out, i, 'prev');
+    removed++;
+  }
+  return { events: out, removed };
+}

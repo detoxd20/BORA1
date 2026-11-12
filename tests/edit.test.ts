@@ -120,3 +120,22 @@ describe('moveEnd', () => {
     expect(r[2]!.start).toBe(3.5);
   });
 });
+
+import { dropShort } from '../src/songs/edit';
+describe('dropShort', () => {
+  it('acorde curtinho entre dois acordes some e o anterior ocupa o tempo', () => {
+    const s = [e(0, 2, 'C', 0), e(2, 2.3, 'G7', 7, '7'), e(2.3, 4, 'Dm', 2, 'min')];
+    const r = dropShort(s, 0.6);
+    expect(r.removed).toBe(1);
+    expect(r.events.map((x) => [x.name, x.start, x.end])).toEqual([['C', 0, 2.3], ['Dm', 2.3, 4]]);
+  });
+  it('vários curtos seguidos e curto no começo', () => {
+    const s = [e(0, 0.2, 'A', 9), e(0.2, 3, 'C', 0), e(3, 3.2, 'F#', 6), e(3.2, 3.4, 'B', 11), e(3.4, 6, 'G7', 7, '7')];
+    const r = dropShort(s, 0.6);
+    expect(r.removed).toBe(3);
+    expect(r.events.map((x) => [x.name, x.start, x.end])).toEqual([['C', 0, 3.4], ['G7', 3.4, 6]]);
+  });
+  it('sem curtos, nada muda', () => {
+    expect(dropShort(song, 0.6)).toEqual({ events: song, removed: 0 });
+  });
+});

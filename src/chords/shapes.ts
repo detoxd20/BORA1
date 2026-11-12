@@ -116,6 +116,11 @@ const STANDARD: Record<string, number[]> = {
   '4:m7': [2, 0, 0, 0], // Em7
   '11:7': [4, 2, 4, 4], // B7
   '9:7': [2, 0, 2, 2], // A7
+  // "Quadradinho de Fá maior" (Léo Soares), enviado pelo dono: F 3-2-1-3 · D7 4-2-1-4 · Gm 5-3-3-5 · C7 5-3-5-5
+  '5:maj': [3, 2, 1, 3], // F
+  '2:7': [4, 2, 1, 4], // D7 (sem fundamental: F# A C F#)
+  '7:min': [5, 3, 3, 5], // Gm
+  '0:7': [5, 3, 5, 5], // C7 (sem fundamental: G Bb E G)
 };
 
 /** Nota de "quão alto e solto" — menor é melhor. Cordas soltas pesam: no cavaquinho a forma fechada é a regra. */

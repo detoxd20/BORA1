@@ -233,6 +233,9 @@ audio.game-bg { display: none; }
 .strum { position: absolute; left: 6%; right: 6%; height: 2px; background: #fff; border-radius: 2px; }
 .gcard { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; border-radius: 16px; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 86%, transparent), rgba(10,12,16,.8)); border: 2px solid var(--c); contain: layout paint style; }
 .gcard-name { font-weight: 800; color: var(--c); line-height: 1; }
+.gcard { overflow: hidden; }
+.gcard.thin { padding: 0 10px; border-width: 1px; border-radius: 8px; background: color-mix(in srgb, var(--c) 45%, transparent); }
+.gcard.thin .gcard-name { color: #fff; }
 .hit-line { position: absolute; left: 0; right: 0; height: 0; border-top: 4px solid var(--c, var(--accent)); box-shadow: 0 0 16px var(--c, var(--accent)); }
 .past-shade { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, rgba(5,7,10,.35), rgba(5,7,10,.8)); pointer-events: none; }
 .hit-line span { position: absolute; left: 10px; top: -20px; text-shadow: 0 0 6px #000; color: var(--c, var(--accent)) !important; font-size: 11px; letter-spacing: 1px; color: var(--accent); font-weight: 700; }
