@@ -14,7 +14,7 @@ linha do tempo (ajuste fino) · (4) pista estilo Guitar Hero + pontuação/timin
 (6) batidas · (7) afinador (feito na v0.1, polir por último). Fones são recomendados: o som do vídeo vaza no microfone.
 
 ### Leitura dos acordes escritos no vídeo (feito)
-Usuário marca o retângulo dos nomes (ex.: faixa superior da aula "Cacinho do cavaco"); OCR local (tesseract.js, ~15 MB em `public/ocr/`,
+Usuário marca o retângulo dos nomes (ex.: faixa superior da aula "Cicinho do cavaco"); OCR local (tesseract.js, ~15 MB em `public/ocr/`,
 copiado por `scripts/copy-ocr.mjs` no predev/prebuild, fora do precache) lê 1 quadro/s → `Observation[]` → `buildVocabulary` (trechos, confirma
 2 leituras iguais) → `analyzeChords({vocabulary})` restringe o Viterbi a esses acordes (fora da lista = "sem acorde").
 Região automática (padrão): `findChordRegion` lê o quadro inteiro em ~20 instantes (OCR com bbox), `pickRegion` vota onde palavras-acorde aparecem sempre no mesmo lugar
