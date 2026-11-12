@@ -127,3 +127,64 @@ describe('ScoreEngine', () => {
     expect(js.every((j) => j.grade === 'perfeito')).toBe(true);
   });
 });
+
+import { gateFromNoise } from '../src/game/scoring';
+describe('limite de volume pelo ruído do ambiente', () => {
+  it('sala silenciosa → limite baixo (sensível); sala barulhenta → limite alto', () => {
+    expect(gateFromNoise(Array(60).fill(-75))).toBe(-58);
+    expect(gateFromNoise(Array(60).fill(-50))).toBe(-40);
+    expect(gateFromNoise(Array(60).fill(-20))).toBe(-32); // nunca fica surdo de vez
+  });
+  it('se o jogador já estiver tocando durante a medição, não infla o limite', () => {
+    const levels = [...Array(40).fill(-60), ...Array(20).fill(-15)]; // 1/3 do tempo com cavaco
+    expect(gateFromNoise(levels)).toBe(-50);
+  });
+  it('poucas medições → valor padrão', () => {
+    expect(gateFromNoise([-40])).toBe(-48);
+  });
+  it('o motor passa a ignorar som abaixo do limite ajustado', () => {
+    const e = new ScoreEngine(targets, templates);
+    e.setGate(-30);
+    const js = [];
+    for (let t = 0; t < 15; t += DT) js.push(...e.push({ t, chroma: at(t) ? chroma.get(at(t)!)! : SILENT, levelDb: -40 }));
+    js.push(...e.finish());
+    expect(js.every((j) => j.grade === 'erro')).toBe(true);
+  });
+});
+
+describe('faixa do cavaquinho no microfone (270 Hz para cima)', () => {
+  const live = new ChromaExtractor({ sampleRate: SR, fftSize: FFT, minFreq: 270, maxFreq: 2400 });
+  const mix = (frets: number[], extra: Array<[number, number]>) => {
+    const len = FFT + 64;
+    const a = new Float32Array(len);
+    frets.forEach((f, i) => {
+      const s = synth(midiToFreq(OPEN[i]! + f), SR, len, { amp: 0.2, seed: 31 + i });
+      for (let k = 0; k < len; k++) a[k]! += s[k] as number;
+    });
+    for (const [hz, amp] of extra) {
+      const s = synth(hz, SR, len, { amp, harmonics: [1], seed: 77 });
+      for (let k = 0; k < len; k++) a[k]! += s[k] as number;
+    }
+    return a;
+  };
+  it('zumbido forte de 120 Hz e um grave de 180 Hz não atrapalham o reconhecimento do acorde', () => {
+    for (const [n] of SONG) {
+      const c = live.compute(mix(shapes.get(n)!, [[120, 0.5], [180, 0.4]])).chroma;
+      expect(classify({ t: 0, chroma: c, levelDb: -20 }, templates, DEFAULT_SCORE).key, n).toBe(n);
+    }
+  });
+  it('só o grave (sem cavaco) não vira acorde nenhum', () => {
+    const len = FFT + 64;
+    const a = new Float32Array(len);
+    for (const [hz, amp] of [[120, 0.5], [180, 0.4]] as const) {
+      const s = synth(hz, SR, len, { amp, harmonics: [1], seed: 5 });
+      for (let k = 0; k < len; k++) a[k]! += s[k] as number;
+    }
+    const c = live.compute(a).chroma;
+    expect(Array.from(c).reduce((x, y) => x + y, 0)).toBe(0);
+  });
+  it('a corda mais grave (Ré4, 293,66 Hz) continua sendo ouvida', () => {
+    const c = live.compute(mix([0, 0, 0, 0], [])).chroma; // cordas soltas: D G B D
+    expect(c[2]!).toBeGreaterThan(0.2); // Ré presente
+  });
+});

@@ -7,7 +7,7 @@ import { getTuning } from '../tuner/tunings';
 import { loadShapePrefs } from '../storage/shapePrefs';
 import { ChordListener } from '../audio/chordListener';
 import { drawHighway, LANE_COLORS, makeGeometry, SmoothClock, spawnSparks, stepParticles, type Flash, type GameChord, type Geometry, type Particle } from '../game/highway';
-import { ScoreEngine, shapeTemplate, type Grade, type Judgement, type ScoreSummary, type Target } from '../game/scoring';
+import { gateFromNoise, ScoreEngine, shapeTemplate, type Grade, type Judgement, type ScoreSummary, type Target } from '../game/scoring';
 import { ChordDiagram, chordHue } from './ChordDiagram';
 import { useWakeLock } from './useWakeLock';
 
@@ -100,6 +100,8 @@ export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClos
   const latencyRef = useRef(latency);
   latencyRef.current = latency;
   const reported = useRef(false);
+  const noise = useRef<number[]>([]);
+  const [gate, setGate] = useState<number | null>(null);
 
   const newEngine = () => {
     engine.current = new ScoreEngine(targets, templates);
@@ -238,6 +240,12 @@ export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClos
         m.playbackRate = rate;
         void m.play();
       }
+      if (micRef.current && engine.current) {
+        // limite de volume ajustado ao ruído do lugar onde você está
+        const g = gateFromNoise(noise.current);
+        engine.current.setGate(g);
+        setGate(g);
+      }
       setPhase('play');
       return;
     }
@@ -249,6 +257,7 @@ export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClos
     const m = media.current;
     if (m && fromStart) m.currentTime = 0;
     if (fromStart && micRef.current) newEngine();
+    noise.current = [];
     setCount(3);
     setPhase('count');
   };
@@ -263,6 +272,8 @@ export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClos
       l.onFrame = (f) => {
         const e = engine.current;
         const m = media.current;
+        // durante a contagem 3-2-1, só mede o ruído do ambiente
+        if (phaseRef.current === 'count') noise.current.push(f.levelDb);
         if (!e || !m || m.paused || phaseRef.current !== 'play') return;
         // tempo da música em que o som foi tocado: agora − idade do som − atraso de áudio escolhido
         const t = gameT.current - (f.ageSec + latencyRef.current / 1000) * m.playbackRate;
@@ -434,6 +445,7 @@ export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClos
                 <span>Sincronia do som: <b>{latency} ms</b></span>
                 <input type="range" min={0} max={500} step={10} value={latency} className="g-slider" onChange={(e) => pickLatency(Number(e.target.value))} aria-label="Atraso do som" />
                 <small>Acertos saindo como "ATRASADO" mesmo tocando na hora? Aumente. Fone Bluetooth costuma pedir 200–300 ms.</small>
+                {gate !== null && <small>Ruído do ambiente medido: o jogo ignora sons abaixo de {Math.round(gate)} dB.</small>}
               </label>
             )}
             <button className="g-btn" onClick={() => begin(true)}>↺ REINICIAR</button>
