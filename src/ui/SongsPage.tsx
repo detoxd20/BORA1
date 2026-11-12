@@ -8,6 +8,7 @@ import { DEFAULT_REGION, SCAN_STEP, findChordRegion, scanChords, type Region } f
 import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } from '../songs/vocabulary';
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
+import { GameScreen } from './GameScreen';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 import { insertChord, mergeRepeats, moveEnd, moveStart, removeChord, retypeChord } from '../songs/edit';
 import { nearestOnset } from '../audio/onsets';
@@ -56,6 +57,7 @@ export function SongsPage() {
   const [follow, setFollow] = useState(true);
   const [picking, setPicking] = useState(false);
   const [vocabEdit, setVocabEdit] = useState(false);
+  const [gaming, setGaming] = useState(false);
   const [stage, setStage] = useState<'find' | 'read'>('read');
   const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLMediaElement>(null);
@@ -550,6 +552,10 @@ export function SongsPage() {
 
           {status === 'ready' && (
             <>
+              <button className="btn primary play" onClick={() => { video.current?.pause(); setGaming(true); }} disabled={events.length === 0}>
+                🎮 Jogar
+              </button>
+
               <div className="now-next">
                 <div className="now">
                   <small>AGORA</small>
@@ -560,18 +566,6 @@ export function SongsPage() {
                   <div className="chord-mid">{next ? next.name : '—'}</div>
                 </div>
               </div>
-
-              <div className="seg three" role="group" aria-label="Limpeza de falsos acordes">
-                {(['suave', 'medio', 'forte'] as const).map((l) => (
-                  <button key={l} className={song.cleanLevel === l ? 'on' : ''} onClick={() => setLevel(l)}>
-                    {l === 'suave' ? 'Limpeza suave' : l === 'medio' ? 'Média' : 'Forte'}
-                  </button>
-                ))}
-              </div>
-              <p className="muted small">
-                Voz ou batida virando acorde? Aumente a limpeza. Faltando acordes? Diminua.
-                {' '}<b>{saved ? 'Salvo ✓' : 'Salvando…'}</b>
-              </p>
 
               <div className="toolbar">
                 <button
@@ -585,6 +579,37 @@ export function SongsPage() {
                 </button>
                 <button className="chip" onClick={undo} disabled={undoCount === 0}>
                   ↶ Desfazer{undoCount > 0 ? ` (${undoCount})` : ''}
+                </button>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    const t = video.current?.currentTime ?? 0;
+                    const r = insertChord(events, t);
+                    if (song) commit({ ...song, events: r.events, edited: true });
+                    startEditing(r.index);
+                  }}
+                >
+                  + Acorde aqui
+                </button>
+              </div>
+              <p className="muted small"><b>{saved ? 'Salvo ✓' : 'Salvando…'}</b></p>
+
+              <details className="tools">
+                <summary>🛠 Ferramentas de edição</summary>
+              <div className="seg three" role="group" aria-label="Limpeza de falsos acordes">
+                {(['suave', 'medio', 'forte'] as const).map((l) => (
+                  <button key={l} className={song.cleanLevel === l ? 'on' : ''} onClick={() => setLevel(l)}>
+                    {l === 'suave' ? 'Limpeza suave' : l === 'medio' ? 'Média' : 'Forte'}
+                  </button>
+                ))}
+              </div>
+                <p className="muted small">Voz ou batida virando acorde? Aumente a limpeza. Faltando acordes? Diminua.</p>
+                <div className="toolbar">
+                <button className="chip accent" disabled={audioOnly} onClick={() => void autoRead()}>
+                  Ler acordes do vídeo
+                </button>
+                <button className="chip" disabled={audioOnly} onClick={() => { video.current?.pause(); setPicking(true); }}>
+                  Ajustar região
                 </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
                 <button
@@ -605,24 +630,8 @@ export function SongsPage() {
                 >
                   ✂ Apagar depois daqui
                 </button>
-                <button className="chip accent" disabled={audioOnly} onClick={() => void autoRead()}>
-                  Ler acordes do vídeo
-                </button>
-                <button className="chip" disabled={audioOnly} onClick={() => { video.current?.pause(); setPicking(true); }}>
-                  Ajustar região
-                </button>
-                <button
-                  className="chip"
-                  onClick={() => {
-                    const t = video.current?.currentTime ?? 0;
-                    const r = insertChord(events, t);
-                    if (song) commit({ ...song, events: r.events, edited: true });
-                    startEditing(r.index);
-                  }}
-                >
-                  + Acorde aqui
-                </button>
-              </div>
+                </div>
+              </details>
               {ocrNote && <p className="muted small">{ocrNote}</p>}
               {error && <p className="error small">{error}</p>}
               {song.vocab && song.vocab.length > 0 && (
@@ -649,6 +658,8 @@ export function SongsPage() {
           )}
         </div>
       )}
+
+      {gaming && song && <GameScreen song={song} url={url} audioOnly={audioOnly} onClose={() => setGaming(false)} />}
 
       {picking && video.current && (
         <RegionPicker video={video.current as HTMLVideoElement} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />
