@@ -3,12 +3,22 @@
 App web (PWA) para treinar cavaquinho, **uso pessoal**. Abre no Chrome Android, sem instalação.
 Qualidade de produto profissional, não protótipo. Cada etapa só avança quando funcionar bem no celular real com um cavaco real.
 
-## Módulos (ordem de construção)
+## NOVA PRIORIDADE (decisão do dono)
+Jogo estilo karaokê/Guitar Hero: pista de acordes caindo, vídeo atrás sincronizado, o cavaco toca e o app pontua.
+Os acordes/tempos são detectados AUTOMATICAMENTE no áudio de vídeos de aulas (acordes já aparecem na tela) + ajuste fino manual.
+Limite técnico: o YouTube não expõe áudio/frames do iframe e não há backend → a análise roda sobre ARQUIVO de vídeo/áudio do próprio
+usuário, carregado no aparelho (decodeAudioData offline). Não construir baixador de YouTube. O afinador fica por ÚLTIMO.
+
+Ordem: (1) motor de acordes ✅ chroma+modelos+Viterbi offline · (2) detector ao vivo (AudioWorklet) · (3) player de vídeo + editor de
+linha do tempo (ajuste fino) · (4) pista estilo Guitar Hero + pontuação/timing + calibração de latência · (5) biblioteca/PWA ·
+(6) batidas · (7) afinador (feito na v0.1, polir por último). Fones são recomendados: o som do vídeo vaza no microfone.
+
+## Módulos (histórico)
 1. Afinador ✅ (v0.1)
 2. Detector de acordes (motor de áudio)
 3. Cifras com rolagem inteligente (score following)
 4. Motor de batidas (samples reais em `public/samples/`, lookahead scheduler, swing)
-5. Modo jogo com fases (detalhar só depois dos módulos 1–4)
+5. Modo jogo com fases
 
 ## Por que as versões anteriores falharam
 No-code + JS remendado (latência/detecção ruins) → aqui: código próprio, tipado e testado.

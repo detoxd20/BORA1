@@ -14,7 +14,7 @@ export function synth(
     return seed / 0xffffffff - 0.5;
   };
   const out = new Float32Array(length);
-  const norm = harmonics.reduce((a, b) => a + Math.abs(b), 0);
+  const norm = harmonics.reduce((a, b) => a + Math.abs(b), 0) || 1;
   for (let i = 0; i < length; i++) {
     let v = 0;
     harmonics.forEach((h, k) => {
