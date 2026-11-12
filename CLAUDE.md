@@ -31,6 +31,8 @@ Persistência: cada edição salva na hora (fila, sem debounce), "Desfazer" (40 
 backup/restauração em JSON (`exportBackup`/`importBackup`; músicas importadas ficam `needsFile` até o usuário escolher o vídeo). O app mostra se o armazenamento está protegido
 (`navigator.storage.persist`). Hipótese para "perdi as edições ao recarregar": armazenamento separado por onde o link é aberto (aba do app de chat × Chrome × PWA instalado) —
 orientar a instalar na tela inicial e abrir sempre por ele.
+Player (Android Chrome é o ponto frágil; não reproduzível no desktop): vigia de 6 s + `onError` + detector de "deu play e não andou" → plano B automático (copia o Blob p/ memória; na 1ª carga
+usa `blobRef`, pois o arquivo só vai ao IndexedDB depois da análise) → cartão com diagnóstico copiável + "Tocar só o áudio" (<audio>, acordes seguem sincronizados). OCR fica desabilitado nesse modo.
 Pendente: destacar trechos onde áudio e vídeo discordam.
 
 ## Módulos (histórico)
