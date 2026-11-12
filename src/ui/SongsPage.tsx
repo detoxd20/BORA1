@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHORD_TYPES, chordName } from '../chords/models';
+import { cleanEvents, CLEAN_LEVELS, type CleanLevel } from '../chords/analyzer';
+import { deleteSong, getBlob, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
 import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
-import { activeIndex, fileKey, fmtTime, loadEvents, saveEvents, type ChordEvent } from '../songs/types';
+import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 
 type Status = 'idle' | 'decoding' | 'analyzing' | 'ready' | 'error';
 
@@ -16,32 +18,74 @@ function normalize(list: ChordEvent[]): ChordEvent[] {
 }
 
 export function SongsPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [library, setLibrary] = useState<SongMeta[]>([]);
+  const [song, setSong] = useState<SongMeta | null>(null);
   const [url, setUrl] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
-  const [events, setEvents] = useState<ChordEvent[]>([]);
   const [cur, setCur] = useState(-1);
   const [editing, setEditing] = useState<number | null>(null);
-  const [fromCache, setFromCache] = useState(false);
+  const [saved, setSaved] = useState(true);
   const video = useRef<HTMLVideoElement>(null);
-  const keyRef = useRef('');
   const listRef = useRef<HTMLDivElement>(null);
+  const saveTimer = useRef<number>(0);
+  const events = song?.events ?? [];
   const eventsRef = useRef(events);
   eventsRef.current = events;
 
-  const analyze = useCallback(async (f: File) => {
+  const refresh = useCallback(() => void listSongs().then(setLibrary).catch(() => setLibrary([])), []);
+  useEffect(() => {
+    refresh();
+    void requestPersistence();
+  }, [refresh]);
+
+  const close = () => {
+    window.clearTimeout(saveTimer.current);
+    if (url) URL.revokeObjectURL(url);
+    setUrl('');
+    setSong(null);
+    setStatus('idle');
+    setEditing(null);
+    setCur(-1);
+    refresh();
+  };
+
+  /** Salva as edições logo após cada mudança. */
+  const commit = (next: SongMeta, flushNow = false) => {
+    setSong(next);
+    setSaved(false);
+    window.clearTimeout(saveTimer.current);
+    const write = () => void saveSong({ ...next, updatedAt: Date.now() }).then(() => setSaved(true)).catch(() => setError('Não consegui salvar as alterações.'));
+    if (flushNow) write();
+    else saveTimer.current = window.setTimeout(write, 250);
+  };
+
+  // Garante o salvamento se o app for fechado/recarregado com edição pendente
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current && song) void saveSong({ ...song, updatedAt: Date.now() });
+    };
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [song]);
+
+  const runAnalysis = useCallback(async (file: Blob, base: SongMeta, level: CleanLevel) => {
     setError('');
     try {
       setStatus('decoding');
       setProgress(0);
-      const { samples, sampleRate } = await decodeToMono(f);
+      const { samples, sampleRate } = await decodeToMono(file as File);
       setStatus('analyzing');
-      const ev = await analyzeInWorker(samples, sampleRate, setProgress);
-      setEvents(ev);
-      saveEvents(keyRef.current, ev);
-      setFromCache(false);
+      const raw = await analyzeInWorker(samples, sampleRate, setProgress);
+      const meta: SongMeta = { ...base, raw, events: cleanEvents(raw, CLEAN_LEVELS[level]), cleanLevel: level, edited: false, updatedAt: Date.now() };
+      await saveSong(meta, file);
+      setSong(meta);
+      setSaved(true);
       setStatus('ready');
     } catch {
       setError('Não consegui ler o áudio deste arquivo. Tente um MP4 (H.264/AAC), MP3 ou WAV.');
@@ -51,25 +95,44 @@ export function SongsPage() {
 
   const pick = (f: File | undefined) => {
     if (!f) return;
-    if (url) URL.revokeObjectURL(url);
-    setFile(f);
+    const base: SongMeta = {
+      id: newId(), name: f.name.replace(/\.[^.]+$/, ''), size: f.size, type: f.type,
+      createdAt: Date.now(), updatedAt: Date.now(), raw: [], events: [], cleanLevel: 'medio',
+    };
     setUrl(URL.createObjectURL(f));
-    setEvents([]);
+    setSong(base);
     setCur(-1);
-    setEditing(null);
-    keyRef.current = fileKey(f);
-    const cached = loadEvents(keyRef.current);
-    if (cached) {
-      setEvents(cached);
-      setFromCache(true);
-      setStatus('ready');
-    } else void analyze(f);
+    void runAnalysis(f, base, 'medio');
+  };
+
+  const open = async (meta: SongMeta) => {
+    const blob = await getBlob(meta.id);
+    if (!blob) {
+      setError('O arquivo desta música não está mais guardado. Apague-a e carregue de novo.');
+      return;
+    }
+    setError('');
+    setUrl(URL.createObjectURL(blob));
+    setSong(meta);
+    setSaved(true);
+    setStatus('ready');
   };
 
   const update = (next: ChordEvent[]) => {
-    const n = normalize(next);
-    setEvents(n);
-    saveEvents(keyRef.current, n);
+    if (song) commit({ ...song, events: normalize(next), edited: true });
+  };
+
+  const setLevel = (level: CleanLevel) => {
+    if (!song) return;
+    if (song.edited && !window.confirm('Mudar a limpeza refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
+    commit({ ...song, cleanLevel: level, events: cleanEvents(song.raw, CLEAN_LEVELS[level]), edited: false }, true);
+  };
+
+  const reanalyze = async () => {
+    if (!song) return;
+    if (song.edited && !window.confirm('Analisar de novo descarta os ajustes que você fez à mão. Continuar?')) return;
+    const blob = await getBlob(song.id);
+    if (blob) void runAnalysis(blob, song, (song.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (song.cleanLevel as CleanLevel) : 'medio');
   };
 
   // Acorde atual conforme o tempo do vídeo
@@ -114,29 +177,55 @@ export function SongsPage() {
   return (
     <>
       <header className="top">
-        <h1 className="title static">Músicas</h1>
-        {file && (
+        <h1 className="title static">{song ? song.name : 'Músicas'}</h1>
+        {song ? (
+          <button className="chip" onClick={close}>Biblioteca</button>
+        ) : (
           <label className="chip">
-            Trocar arquivo
-            <input type="file" accept="video/*,audio/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
+            + Novo
+            <input type="file" accept="video/*,audio/*" hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
         )}
       </header>
 
-      {!file ? (
-        <div className="start">
-          <div className="start-icon" aria-hidden>🎬</div>
-          <h2>Carregue a videoaula</h2>
-          <p className="muted">
-            Escolha um arquivo de vídeo ou áudio do seu aparelho. O app descobre os acordes e os tempos sozinho —
-            depois você ajusta o que precisar. Tudo é feito no celular, nada é enviado.
-          </p>
-          <label className="btn primary center">
-            Escolher arquivo
-            <input type="file" accept="video/*,audio/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
-          </label>
-          <p className="muted small">Use fones ao tocar junto: o som do vídeo atrapalha o microfone.</p>
-        </div>
+      {!song ? (
+        library.length === 0 ? (
+          <div className="start">
+            <div className="start-icon" aria-hidden>🎬</div>
+            <h2>Carregue a videoaula</h2>
+            <p className="muted">
+              Escolha um vídeo ou áudio do seu aparelho. O app descobre os acordes e os tempos sozinho, e você ajusta o que
+              precisar. O arquivo fica guardado no app, e nada é enviado para a internet.
+            </p>
+            <label className="btn primary center">
+              Escolher arquivo
+              <input type="file" accept="video/*,audio/*" hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+            <p className="muted small">Use fones ao tocar junto: o som do vídeo atrapalha o microfone.</p>
+            {error && <p className="error">{error}</p>}
+          </div>
+        ) : (
+          <div className="library">
+            {error && <p className="error">{error}</p>}
+            {library.map((m) => (
+              <div key={m.id} className="lib-row">
+                <button className="lib-open" onClick={() => void open(m)}>
+                  <span className="lib-name">{m.name}</span>
+                  <span className="muted small">{m.events.length} acordes · {(m.size / 1048576).toFixed(1)} MB</span>
+                </button>
+                <button
+                  className="row-edit"
+                  aria-label={`Apagar ${m.name}`}
+                  onClick={() => {
+                    if (window.confirm(`Apagar "${m.name}" e os acordes dela?`)) void deleteSong(m.id).then(refresh);
+                  }}
+                >
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+        )
       ) : (
         <div className="song">
           <video ref={video} src={url} controls playsInline className="video" />
@@ -170,24 +259,34 @@ export function SongsPage() {
                 </div>
               </div>
 
+              <div className="seg three" role="group" aria-label="Limpeza de falsos acordes">
+                {(['suave', 'medio', 'forte'] as const).map((l) => (
+                  <button key={l} className={song.cleanLevel === l ? 'on' : ''} onClick={() => setLevel(l)}>
+                    {l === 'suave' ? 'Limpeza suave' : l === 'medio' ? 'Média' : 'Forte'}
+                  </button>
+                ))}
+              </div>
+              <p className="muted small">
+                Voz ou batida virando acorde? Aumente a limpeza. Faltando acordes? Diminua.
+                {' '}<b>{saved ? 'Salvo ✓' : 'Salvando…'}</b>
+              </p>
+
               <div className="toolbar">
-                <button className="chip" onClick={() => file && void analyze(file)}>Analisar de novo</button>
+                <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
                 <button
                   className="chip"
                   onClick={() => {
                     const t = video.current?.currentTime ?? 0;
                     const n = normalize([...events, { start: t, end: t + 2, name: 'C', root: 0, typeId: 'maj', confidence: 1 }]);
-                    setEvents(n);
-                    saveEvents(keyRef.current, n);
+                    update(n);
                     setEditing(n.findIndex((e) => e.start === t));
                   }}
                 >
                   + Acorde aqui
                 </button>
               </div>
-              {fromCache && <p className="muted small">Acordes salvos deste arquivo (com seus ajustes).</p>}
               {events.length === 0 && (
-                <p className="muted">Não encontrei acordes. Tente um trecho com o instrumento mais evidente.</p>
+                <p className="muted">Nenhum acorde passou pela limpeza. Tente "Limpeza suave".</p>
               )}
 
               <div className="timeline" ref={listRef}>
