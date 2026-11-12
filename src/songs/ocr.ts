@@ -60,6 +60,26 @@ export function frameToCanvas(canvas: HTMLCanvasElement, v: HTMLVideoElement): v
   canvas.getContext('2d')!.drawImage(v, 0, 0);
 }
 
+/**
+ * Usa o player que já existe na tela (um só decodificador — celulares Android limitam quantos vídeos abrem ao mesmo tempo)
+ * ou, se receber um endereço, abre um vídeo escondido. `release` devolve o player como estava.
+ */
+async function acquire(src: string | HTMLVideoElement): Promise<{ video: HTMLVideoElement; release: () => Promise<void> }> {
+  if (typeof src !== 'string') {
+    src.pause();
+    const t0 = src.currentTime;
+    return { video: src, release: () => seekTo(src, t0) };
+  }
+  const video = await loadVideo(src);
+  return {
+    video,
+    release: async () => {
+      video.removeAttribute('src');
+      video.load();
+    },
+  };
+}
+
 /** Leitor de acordes (OCR local). Crie um, use `read` várias vezes e chame `terminate`. */
 export class ChordOcr {
   private constructor(private worker: Awaited<ReturnType<typeof createWorker>>) {}
@@ -123,13 +143,16 @@ export class ChordOcr {
 }
 
 export async function scanChords(
-  src: string,
+  src: string | HTMLVideoElement,
   region: Region,
   opts: { step?: number; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
 ): Promise<Observation[]> {
   const step = opts.step ?? SCAN_STEP;
-  const video = await loadVideo(src);
-  if (!video.videoWidth) throw new Error('Este arquivo não tem imagem (é só áudio).');
+  const { video, release } = await acquire(src);
+  if (!video.videoWidth) {
+    await release();
+    throw new Error('Este arquivo não tem imagem (é só áudio).');
+  }
   const duration = video.duration;
   const ocr = await ChordOcr.create();
   try {
@@ -163,8 +186,7 @@ export async function scanChords(
     return out;
   } finally {
     await ocr.terminate();
-    video.removeAttribute('src');
-    video.load();
+    await release();
   }
 }
 
@@ -173,12 +195,15 @@ export async function scanChords(
  * e vê onde palavras-acorde aparecem sempre no mesmo lugar.
  */
 export async function findChordRegion(
-  src: string,
+  src: string | HTMLVideoElement,
   opts: { samples?: number; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
 ): Promise<Region | null> {
   const n = opts.samples ?? 20;
-  const video = await loadVideo(src);
-  if (!video.videoWidth) throw new Error('Este arquivo não tem imagem (é só áudio).');
+  const { video, release } = await acquire(src);
+  if (!video.videoWidth) {
+    await release();
+    throw new Error('Este arquivo não tem imagem (é só áudio).');
+  }
   const ocr = await ChordOcr.create();
   try {
     const canvas = document.createElement('canvas');
@@ -195,7 +220,6 @@ export async function findChordRegion(
     return pickRegion(frames);
   } finally {
     await ocr.terminate();
-    video.removeAttribute('src');
-    video.load();
+    await release();
   }
 }
