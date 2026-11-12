@@ -1,5 +1,6 @@
 /** Biblioteca local (IndexedDB): guarda o vídeo/áudio e os acordes editados de cada música. */
 import type { ChordEvent } from '../chords/analyzer';
+import type { Onset } from '../audio/onsets';
 import type { Region } from '../songs/ocr';
 import type { VocabSegment } from '../songs/vocabulary';
 
@@ -22,6 +23,8 @@ export interface SongMeta {
   region?: Region;
   /** Vídeo mostra um acorde por vez (o da tela é o atual), em vez de uma lista. */
   oneAtATime?: boolean;
+  /** Palhetadas detectadas no áudio (para encostar trocas de acorde e, depois, pontuar o jogo). */
+  onsets?: Onset[];
 }
 
 const DB = 'cavaco';

@@ -24,7 +24,10 @@ esparso), 3 ampliações por quadro (64/128/256 px) e votação temporal (janela
 lacuna curta no meio = vale o áudio; lista com ≥3 acordes = restrição forte; 1–2 acordes na tela = dica suave (áudio claro pode discordar).
 Modo "um acorde por vez" detectado automaticamente (mediana ≤1 acorde/leitura) + `fillFromVideo`. `VocabEditor`: remover falsos/adicionar faltantes.
 Limites conhecidos: OCR erra letras soltas (ex.: "G" lido como "G7" ou perdido); instante das trocas pode atrasar/adiantar até ~1 s.
-Pendente: refinar o instante exato das trocas (hoje pode adiantar até ~0,5 s) com detecção de onsets; destacar trechos onde áudio e vídeo discordam.
+Detecção de palhetada (feito): `src/audio/onsets.ts` (fluxo espectral log, só aumento de energia) + `refineWithOnsets` (janela ±1 s, ignora ataques fracos): o Viterbi
+decide QUAL acorde, a palhetada decide QUANDO troca. Onsets ficam em `SongMeta.onsets` (base para pontuar o jogo). Teste sintético: erro máx. 84→29 ms; trocas de acordes quase
+iguais (G7→G) com voz forte ainda podem errar ~1 s. Editor: "Grudar na palhetada mais próxima". Apagar = um botão (anterior continua; repetidos juntam).
+Pendente: destacar trechos onde áudio e vídeo discordam.
 
 ## Módulos (histórico)
 1. Afinador ✅ (v0.1)

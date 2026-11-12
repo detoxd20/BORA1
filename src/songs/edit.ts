@@ -51,3 +51,18 @@ export function retypeChord(
   const at = merged.findIndex((e) => e.start <= target.start && e.end > target.start);
   return { events: merged, index: at >= 0 ? at : Math.min(index, merged.length - 1) };
 }
+
+/** Move o início do acorde `index` para `t`; o anterior acompanha (sem buraco nem sobreposição). */
+export function moveStart(events: ChordEvent[], index: number, t: number): ChordEvent[] {
+  const target = events[index];
+  if (!target) return events;
+  const prev = events[index - 1];
+  const out = events.map((e) => ({ ...e }));
+  const lo = prev ? prev.start + 0.1 : 0;
+  const hi = target.end - 0.1;
+  const nt = Math.min(hi, Math.max(lo, t));
+  (out[index] as ChordEvent).start = nt;
+  const p = out[index - 1];
+  if (p && (Math.abs(p.end - target.start) < 0.3 || p.end > nt)) p.end = nt;
+  return out;
+}

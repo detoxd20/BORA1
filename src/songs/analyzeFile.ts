@@ -1,4 +1,5 @@
 import type { ChordEvent } from '../chords/analyzer';
+import type { Onset } from '../audio/onsets';
 import type { WorkerOut } from './analysis.worker';
 import type { VocabSegment } from './vocabulary';
 
@@ -24,7 +25,7 @@ export function analyzeInWorker(
   sampleRate: number,
   onProgress: (v: number) => void,
   vocabulary?: VocabSegment[],
-): Promise<ChordEvent[]> {
+): Promise<{ events: ChordEvent[]; onsets: Onset[] }> {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./analysis.worker.ts', import.meta.url), { type: 'module' });
     w.onmessage = (ev: MessageEvent<WorkerOut>) => {
@@ -32,7 +33,7 @@ export function analyzeInWorker(
       if (m.type === 'progress') onProgress(m.value);
       else {
         w.terminate();
-        if (m.type === 'done') resolve(m.events);
+        if (m.type === 'done') resolve({ events: m.events, onsets: m.onsets });
         else reject(new Error(m.message));
       }
     };
