@@ -106,10 +106,35 @@ describe('formas padrão do cavaquinho (referência: diagramas da aula do Cicinh
     expect(bestShape(9, 'maj')!.frets).toEqual([2, 2, 2, 2]); // A
     expect(bestShape(9, 'min')!.frets).toEqual([2, 2, 1, 2]); // Am
     expect(bestShape(9, '7')!.frets).toEqual([2, 0, 2, 2]); // A7
-    expect(bestShape(0, '7')!.frets).toEqual([2, 3, 1, 2]); // C7
-    expect(bestShape(2, '7')!.frets).toEqual([4, 5, 3, 4]); // D7
   });
   it('o padrão evita acorde todo em cordas soltas', () => {
     for (let root = 0; root < 12; root++) for (const t of ['maj', 'min', '7']) expect(bestShape(root, t)!.frets.some((f) => f > 0)).toBe(true);
+  });
+});
+
+describe('formas do "Quadradinho de Fá maior" (imagem enviada pelo dono)', () => {
+  const ref: Array<[string, number, string, number[], string[]]> = [
+    ['F', 5, 'maj', [3, 2, 1, 3], ['F', 'A', 'C', 'F']],
+    ['D7', 2, '7', [4, 2, 1, 4], ['F#', 'A', 'C', 'F#']],
+    ['Gm', 7, 'min', [5, 3, 3, 5], ['G', 'A#', 'D', 'G']],
+    ['C7', 0, '7', [5, 3, 5, 5], ['G', 'A#', 'E', 'G']],
+  ];
+  for (const [name, root, type, frets, notes] of ref) {
+    it(`${name} = ${frets.join('-')} é o padrão, é válida e toca ${notes.join(' ')}`, () => {
+      expect(validateShape(frets, root, type)).toBe(true);
+      const s = bestShape(root, type)!;
+      expect(s.frets).toEqual(frets);
+      expect(s.notes).toEqual(notes);
+    });
+  }
+  it('dedos como na imagem', () => {
+    expect(bestShape(5, 'maj')!.fingers).toEqual([3, 2, 1, 4]); // F
+    expect(bestShape(2, '7')!.fingers).toEqual([3, 2, 1, 4]); // D7
+    expect(bestShape(7, 'min')!.fingers).toEqual([3, 1, 2, 4]); // Gm
+    expect(bestShape(0, '7')!.fingers).toEqual([2, 1, 3, 4]); // C7
+  });
+  it('as formas antigas de C7 e D7 continuam disponíveis como opção', () => {
+    expect(shapesFor(0, '7').some((s) => s.frets.join() === '2,3,1,2')).toBe(true);
+    expect(shapesFor(2, '7').some((s) => s.frets.join() === '4,5,3,4')).toBe(true);
   });
 });

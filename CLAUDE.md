@@ -43,6 +43,8 @@ Agora `shapes.ts` tem `FORMS` (formas padrão móveis por tipo: maj F/C/A, min D
 `formScore` (casa mais alta + peso p/ cordas soltas); o gerador só completa as opções. Referência validada por teste: diagramas da aula do Cicinho (G 5-4-3-5, F#m 4-2-2-4, B7 4-2-4-4, Em7 2-0-0-0,
 Dm 3-2-3-3, G7 3-4-3-5), inclusive a numeração dos dedos (um dedo por nota, da casa mais baixa p/ a mais alta). `validateShape` aceita forma sem fundamental em acordes de 4+ notas se as demais notas estão.
 Diagrama: 5 casas a partir da pestana. NÃO voltar a escolher padrão por "mais fácil".
+Também em `STANDARD`, do "Quadradinho de Fá maior" (Léo Soares) enviado pelo dono: F 3-2-1-3, D7 4-2-1-4 (sem fundamental), Gm 5-3-3-5, C7 5-3-5-5 (sem fundamental).
+Pista: a carta tem EXATAMENTE a altura do tempo do acorde (nunca sobrepõe a vizinha); curta = só o nome, muito curta = faixa. Ferramenta "Remover acordes curtos" (<0,6 s, `dropShort`, desfazível).
 Formas preferidas (feito): `ShapePicker` (botão "🎸 Formas") lista os acordes da música com até 8 formas; a escolha vai para `SongMeta.shapes` e vira padrão global (`storage/shapePrefs.ts`);
 `resolveShape` ignora preferência inválida (nunca mostra diagrama errado). Engasgo nas trocas: cartas da pista NÃO mudam de estilo ao trocar de acorde (evita re-rasterizar a pista), sem backdrop-filter,
 janela de cartas recalculada 1×/s; medição no desktop com CPU 4× mais lenta: pior quadro 33→16,8 ms. Efeito no Android real não confirmado.

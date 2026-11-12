@@ -12,7 +12,7 @@ import { GameScreen } from './GameScreen';
 import { ShapePicker } from './ShapePicker';
 import { loadShapePrefs, saveShapePref } from '../storage/shapePrefs';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
-import { insertChord, mergeRepeats, moveEnd, moveStart, removeChord, retypeChord } from '../songs/edit';
+import { dropShort, insertChord, mergeRepeats, moveEnd, moveStart, removeChord, retypeChord } from '../songs/edit';
 import { nearestOnset } from '../audio/onsets';
 
 const MIME: Record<string, string> = {
@@ -620,6 +620,16 @@ export function SongsPage() {
                   Ajustar região
                 </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    const r = dropShort(events, 0.6);
+                    if (r.removed > 0 && song) commit({ ...song, events: r.events, edited: true });
+                    setOcrNote(r.removed > 0 ? `Removi ${r.removed} acorde(s) com menos de 0,6 s. Dá para desfazer.` : 'Não há acordes com menos de 0,6 s.');
+                  }}
+                >
+                  ✂ Remover acordes curtos
+                </button>
                 <button
                   className="chip"
                   onClick={() => {

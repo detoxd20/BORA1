@@ -193,17 +193,20 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
             <div key={`o${i}-${o.t}`} className="strum" style={{ top: -o.t * pps, opacity: 0.15 + 0.5 * (o.strength / maxStrength) }} />
           ))}
           {visible.map(({ e, i }) => {
-            const h = Math.max((e.end - e.start) * pps - 4, 46);
+            // A carta tem EXATAMENTE a altura do tempo do acorde: nunca invade a carta vizinha.
+            // Acorde curto → carta baixa, só com o nome; muito curto → só uma faixa colorida.
+            const h = Math.max((e.end - e.start) * pps - 3, 6);
             const hue = chordHue(e.root);
             const c = `hsl(${hue} 85% 62%)`;
+            const size = h >= 64 ? 34 : Math.max(11, Math.min(24, h - 6));
             return (
               <div
                 key={`${e.start}-${i}`}
-                className="gcard"
+                className={h < 26 ? 'gcard thin' : 'gcard'}
                 style={{ top: -e.start * pps - h, height: h, ['--c' as string]: c, ['--bg' as string]: `hsl(${hue} 60% 22%)` }}
               >
-                <span className="gcard-name" style={{ fontSize: h < 64 ? 24 : 34 }}>{e.name}</span>
-                {h >= 56 && <ChordDiagram root={e.root} typeId={e.typeId} frets={fretsOf(e.root, e.typeId)} height={Math.min(h - 10, 124)} showNotes={h >= 100} color={c} />}
+                {h >= 16 && <span className="gcard-name" style={{ fontSize: size }}>{e.name}</span>}
+                {h >= 60 && <ChordDiagram root={e.root} typeId={e.typeId} frets={fretsOf(e.root, e.typeId)} height={Math.min(h - 8, 124)} showNotes={h >= 104} color={c} />}
               </div>
             );
           })}
