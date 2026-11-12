@@ -9,7 +9,8 @@ import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } fro
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
-import { mergeRepeats, removeChord, retypeChord } from '../songs/edit';
+import { mergeRepeats, moveStart, removeChord, retypeChord } from '../songs/edit';
+import { nearestOnset } from '../audio/onsets';
 
 const MIME: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', '3gp': 'video/3gpp',
@@ -111,8 +112,8 @@ export function SongsPage() {
       setProgress(0);
       const { samples, sampleRate } = await decodeToMono(file as File);
       setStatus('analyzing');
-      const raw = await analyzeInWorker(samples, sampleRate, setProgress, base.vocab);
-      const meta: SongMeta = { ...base, raw, events: cleanEvents(raw, CLEAN_LEVELS[level]), cleanLevel: level, edited: false, updatedAt: Date.now() };
+      const { events: raw, onsets } = await analyzeInWorker(samples, sampleRate, setProgress, base.vocab);
+      const meta: SongMeta = { ...base, raw, onsets, events: cleanEvents(raw, CLEAN_LEVELS[level]), cleanLevel: level, edited: false, updatedAt: Date.now() };
       await saveSong(meta, file);
       setSong(meta);
       setSaved(true);
@@ -171,10 +172,10 @@ export function SongsPage() {
     const { samples, sampleRate } = await decodeToMono(typed(blob, base.name, base.type) as File);
     setStatus('analyzing');
     setProgress(0);
-    const raw = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
+    const { events: raw, onsets } = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
     const level = (base.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (base.cleanLevel as CleanLevel) : 'medio';
     const cleaned = cleanEvents(raw, CLEAN_LEVELS[level]);
-    const meta: SongMeta = { ...base, raw, events: normalize(mergeRepeats(oneAtATime ? fillFromVideo(cleaned, vocab) : cleaned)), vocab, region, oneAtATime, edited: false, updatedAt: Date.now() };
+    const meta: SongMeta = { ...base, raw, onsets, events: normalize(mergeRepeats(oneAtATime ? fillFromVideo(cleaned, vocab) : cleaned)), vocab, region, oneAtATime, edited: false, updatedAt: Date.now() };
     await saveSong(meta);
     setSong(meta);
     setSaved(true);
@@ -555,27 +556,27 @@ export function SongsPage() {
               <button className="pick" onClick={() => update(events.map((e, k) => (k === editing ? { ...e, start: e.start + 0.1 } : e)))}>+0,1 s</button>
               <button className="pick" onClick={() => update(events.map((e, k) => (k === editing ? { ...e, start: video.current?.currentTime ?? e.start } : e)))}>Aqui</button>
             </div>
-            <h3>Apagar este acorde</h3>
-            <p className="muted small">O tempo dele não fica vazio: um vizinho ocupa o lugar.</p>
             <button
-              className="btn danger"
+              className="btn"
+              style={{ marginTop: 8, maxWidth: 'none' }}
+              disabled={!song?.onsets?.length}
               onClick={() => {
-                if (editing === null) return;
-                commit({ ...song!, events: removeChord(events, editing, 'prev'), edited: true });
-                setEditing(null);
+                const o = song?.onsets ? nearestOnset(song.onsets, ed.start, 1) : null;
+                if (o && editing !== null) update(moveStart(events, editing, o.t));
               }}
             >
-              Apagar — o anterior continua{events[editing - 1] ? ` (${events[editing - 1]!.name})` : ''}
+              🎯 Grudar na palhetada mais próxima
             </button>
             <button
               className="btn danger"
               onClick={() => {
                 if (editing === null) return;
-                commit({ ...song!, events: removeChord(events, editing, 'next'), edited: true });
+                // O acorde anterior continua e ocupa o tempo; se for o mesmo acorde dos dois lados, viram um só.
+                commit({ ...song!, events: removeChord(events, editing, 'prev'), edited: true });
                 setEditing(null);
               }}
             >
-              Apagar — o próximo começa antes{events[editing + 1] ? ` (${events[editing + 1]!.name})` : ''}
+              Apagar este acorde
             </button>
           </div>
         </div>

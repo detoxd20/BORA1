@@ -74,3 +74,16 @@ describe('retypeChord', () => {
     expect(r.index).toBe(1);
   });
 });
+
+import { moveStart } from '../src/songs/edit';
+describe('moveStart', () => {
+  it('move o início e o anterior acompanha, sem buraco', () => {
+    const r = moveStart(song, 1, 2.3);
+    expect(r[1]).toMatchObject({ start: 2.3, end: 4 });
+    expect(r[0]!.end).toBe(2.3);
+  });
+  it('não ultrapassa o acorde anterior nem o próprio fim', () => {
+    expect(moveStart(song, 1, -5)[1]!.start).toBeCloseTo(0.1);
+    expect(moveStart(song, 1, 99)[1]!.start).toBeCloseTo(3.9);
+  });
+});
