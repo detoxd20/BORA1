@@ -181,3 +181,5 @@ input[type=range] { width: 100%; height: 40px; accent-color: var(--accent); }
 .lib-row { display: grid; grid-template-columns: 1fr 48px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
 .lib-open { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px 14px; min-height: 64px; }
 .lib-name { font-size: 18px; font-weight: 700; word-break: break-word; }
+.timeline { position: relative; }
+.chip.on { border-color: var(--accent); }
