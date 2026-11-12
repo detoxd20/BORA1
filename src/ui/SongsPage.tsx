@@ -47,6 +47,7 @@ export function SongsPage() {
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState(true);
   const [mediaErr, setMediaErr] = useState('');
+  const [follow, setFollow] = useState(true);
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<number>(0);
@@ -190,11 +191,21 @@ export function SongsPage() {
     return () => cancelAnimationFrame(raf);
   }, [status]);
 
-  // Rola a lista para o acorde atual
+  // Rola só a lista (não a página) para o acorde atual — e só se estiver seguindo e sem editar
+  const centerOn = useCallback((i: number, smooth: boolean) => {
+    const list = listRef.current;
+    const el = list?.querySelector<HTMLElement>(`[data-i="${i}"]`);
+    if (!list || !el) return;
+    list.scrollTo({ top: el.offsetTop - list.clientHeight / 2 + el.clientHeight / 2, behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
   useEffect(() => {
-    if (cur < 0) return;
-    listRef.current?.querySelector<HTMLElement>(`[data-i="${cur}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [cur]);
+    if (cur >= 0 && follow && editing === null) centerOn(cur, true);
+  }, [cur, follow, editing, centerOn]);
+
+  const startEditing = (i: number) => {
+    video.current?.pause();
+    setEditing(i);
+  };
 
   const seek = (t: number) => {
     if (video.current) video.current.currentTime = Math.max(0, t);
@@ -325,6 +336,15 @@ export function SongsPage() {
               </p>
 
               <div className="toolbar">
+                <button
+                  className={`chip ${follow ? 'on' : ''}`}
+                  onClick={() => {
+                    setFollow((f) => !f);
+                    if (!follow && cur >= 0) centerOn(cur, true);
+                  }}
+                >
+                  {follow ? 'Seguindo ✓' : 'Seguir'}
+                </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
                 <button
                   className="chip"
@@ -332,7 +352,7 @@ export function SongsPage() {
                     const t = video.current?.currentTime ?? 0;
                     const n = normalize([...events, { start: t, end: t + 2, name: 'C', root: 0, typeId: 'maj', confidence: 1 }]);
                     update(n);
-                    setEditing(n.findIndex((e) => e.start === t));
+                    startEditing(n.findIndex((e) => e.start === t));
                   }}
                 >
                   + Acorde aqui
@@ -342,13 +362,13 @@ export function SongsPage() {
                 <p className="muted">Nenhum acorde passou pela limpeza. Tente "Limpeza suave".</p>
               )}
 
-              <div className="timeline" ref={listRef}>
+              <div className="timeline" ref={listRef} onPointerDown={() => setFollow(false)} onWheel={() => setFollow(false)}>
                 {events.map((e, i) => (
                   <div key={`${e.start}-${i}`} data-i={i} className={`row ${i === cur ? 'cur' : ''}`}>
                     <button className="row-time" onClick={() => seek(e.start)}>{fmtTime(e.start)}</button>
                     <span className="row-chord">{e.name}</span>
                     <span className={`dot ${e.confidence < 0.7 ? 'low' : ''}`} title={`confiança ${Math.round(e.confidence * 100)}%`} />
-                    <button className="row-edit" onClick={() => setEditing(i)} aria-label={`Editar ${e.name}`}>✎</button>
+                    <button className="row-edit" onClick={() => startEditing(i)} aria-label={`Editar ${e.name}`}>✎</button>
                   </div>
                 ))}
               </div>
