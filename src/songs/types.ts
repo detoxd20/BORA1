@@ -2,28 +2,6 @@ import type { ChordEvent } from '../chords/analyzer';
 
 export type { ChordEvent };
 
-/** Identifica o arquivo do usuário (o app não guarda o vídeo, só os acordes). */
-export function fileKey(f: { name: string; size: number; lastModified: number }): string {
-  return `cavaco:song:v1:${f.name}:${f.size}:${f.lastModified}`;
-}
-
-export function loadEvents(key: string): ChordEvent[] | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as ChordEvent[]) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveEvents(key: string, events: ChordEvent[]): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(events));
-  } catch {
-    /* sem espaço / bloqueado */
-  }
-}
-
 /** Índice do acorde ativo no tempo `t` (o último que começou), ou -1. */
 export function activeIndex(events: ChordEvent[], t: number): number {
   let lo = 0, hi = events.length - 1, ans = -1;

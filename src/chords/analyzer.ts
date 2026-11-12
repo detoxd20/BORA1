@@ -118,3 +118,31 @@ export function analyzeChords(samples: Float32Array, sampleRate: number, opts: A
   }
   return events;
 }
+
+export interface CleanOptions {
+  /** Trechos mais curtos que isso (s) são descartados: batidas na troca, notas soltas. */
+  minDuration: number;
+  /** Trechos com confiança média menor que isso são descartados: voz, ruído. */
+  minConfidence: number;
+}
+
+/** Níveis de limpeza oferecidos na interface. */
+export const CLEAN_LEVELS = {
+  suave: { minDuration: 0.4, minConfidence: 0.5 },
+  medio: { minDuration: 0.8, minConfidence: 0.6 },
+  forte: { minDuration: 1.3, minConfidence: 0.7 },
+} as const satisfies Record<string, CleanOptions>;
+export type CleanLevel = keyof typeof CLEAN_LEVELS;
+
+/** Remove trechos duvidosos e junta vizinhos que viraram o mesmo acorde. */
+export function cleanEvents(events: ChordEvent[], opts: CleanOptions): ChordEvent[] {
+  const kept = events.filter((e) => e.end - e.start >= opts.minDuration && e.confidence >= opts.minConfidence);
+  const out: ChordEvent[] = [];
+  for (const e of kept) {
+    const last = out[out.length - 1];
+    if (last && last.root === e.root && last.typeId === e.typeId && e.start - last.end < 1) {
+      out[out.length - 1] = { ...last, end: e.end, confidence: Math.min(last.confidence, e.confidence) };
+    } else out.push(e);
+  }
+  return out;
+}
