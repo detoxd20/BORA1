@@ -24,8 +24,12 @@ export interface AnalyzeOptions {
   onProgress?: (fraction: number) => void;
   /** Acordes que o vídeo mostra, por trecho: o áudio só escolhe entre eles. */
   vocabulary?: VocabSegment[];
-  /** Quanto um acorde fora da lista é penalizado (em log-score). */
+  /** Quanto um acorde fora da lista é penalizado (em log-score) quando a tela mostra uma lista de acordes. */
   vocabPenalty?: number;
+  /** Penalidade mais leve quando a tela mostra só 1–2 acordes por vez (o áudio muito claro ainda pode discordar). */
+  vocabSoftPenalty?: number;
+  /** Lacuna entre trechos (s) acima da qual consideramos que a faixa sumiu de vez (fala/pausa): nada é aceito. */
+  longGap?: number;
 }
 
 const N_STATE = ALL_MODELS.length; // 144; o estado extra N_STATE = "sem acorde"
@@ -61,14 +65,30 @@ export function analyzeChords(samples: Float32Array, sampleRate: number, opts: A
         e[idx.get(`${c.root}:${c.typeId}`) as number] = 4 * Math.log(Math.max(c.score, 1e-3));
       }
       e[N_STATE] = Math.log(0.3) * 4;
-      if (seg) {
-        // Com a lista do vídeo, é melhor "nenhum acorde" do que um acorde da lista que não combina.
-        e[N_STATE] = Math.log(0.55) * 4;
-        const allowed = new Set(seg.keys);
-        const penalty = opts.vocabPenalty ?? 8;
-        for (let k = 0; k < N_STATE; k++) {
-          const m = ALL_MODELS[k]!;
-          if (!allowed.has(`${m.root}:${m.type.id}`)) e[k] = (e[k] as number) - penalty;
+      const voc = opts.vocabulary;
+      if (voc && voc.length > 0) {
+        const first = voc[0] as VocabSegment;
+        const lastSeg = voc[voc.length - 1] as VocabSegment;
+        let allowed: Set<string> | null = null; // null = sem restrição
+        let penalty = opts.vocabPenalty ?? 8;
+        if (seg) {
+          allowed = new Set(seg.keys);
+          if (seg.keys.length <= 2) penalty = opts.vocabSoftPenalty ?? 1.5;
+        } else if (tFrame < first.start || tFrame >= lastSeg.end) {
+          allowed = new Set(); // começo/fim do vídeo: fala, intro, despedida → nenhum acorde
+        } else {
+          // lacuna no meio: curta = falha do OCR (vale o áudio); longa = faixa sumiu (nada)
+          const prev = [...voc].reverse().find((v) => v.end <= tFrame) as VocabSegment;
+          const next = voc.find((v) => v.start > tFrame) as VocabSegment;
+          if (next.start - prev.end > (opts.longGap ?? 8)) allowed = new Set();
+        }
+        if (allowed) {
+          // modo estrito: "nenhum acorde" vence um candidato fraco; modo suave: deixa o áudio claro decidir
+          if (penalty >= (opts.vocabPenalty ?? 8)) e[N_STATE] = Math.log(0.55) * 4;
+          for (let k = 0; k < N_STATE; k++) {
+            const m = ALL_MODELS[k]!;
+            if (!allowed.has(`${m.root}:${m.type.id}`)) e[k] = (e[k] as number) - penalty;
+          }
         }
       }
     }

@@ -20,6 +20,8 @@ export interface SongMeta {
   /** Acordes lidos no vídeo, por trecho (quando o usuário usou "Ler acordes do vídeo"). */
   vocab?: VocabSegment[];
   region?: Region;
+  /** Vídeo mostra um acorde por vez (o da tela é o atual), em vez de uma lista. */
+  oneAtATime?: boolean;
 }
 
 const DB = 'cavaco';

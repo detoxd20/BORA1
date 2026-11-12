@@ -4,9 +4,10 @@ import { cleanEvents, CLEAN_LEVELS, type CleanLevel } from '../chords/analyzer';
 import { deleteSong, getBlob, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
 import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
-import { DEFAULT_REGION, scanChords, type Region } from '../songs/ocr';
-import { buildVocabulary } from '../songs/vocabulary';
+import { DEFAULT_REGION, SCAN_STEP, scanChords, type Region } from '../songs/ocr';
+import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } from '../songs/vocabulary';
 import { RegionPicker } from './RegionPicker';
+import { VocabEditor } from './VocabEditor';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 
 const MIME: Record<string, string> = {
@@ -52,6 +53,7 @@ export function SongsPage() {
   const [mediaErr, setMediaErr] = useState('');
   const [follow, setFollow] = useState(true);
   const [picking, setPicking] = useState(false);
+  const [vocabEdit, setVocabEdit] = useState(false);
   const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -159,6 +161,25 @@ export function SongsPage() {
     setUrl(URL.createObjectURL(copy));
   };
 
+  /** Refaz a análise de áudio restrita à lista de acordes do vídeo. */
+  const analyzeWithVocab = async (base: SongMeta, vocab: VocabSegment[], region: Region | undefined, oneAtATime: boolean, note: string) => {
+    const blob = await getBlob(base.id);
+    if (!blob) throw new Error('O arquivo desta música não está mais guardado.');
+    setStatus('decoding');
+    const { samples, sampleRate } = await decodeToMono(typed(blob, base.name, base.type) as File);
+    setStatus('analyzing');
+    setProgress(0);
+    const raw = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
+    const level = (base.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (base.cleanLevel as CleanLevel) : 'medio';
+    const cleaned = cleanEvents(raw, CLEAN_LEVELS[level]);
+    const meta: SongMeta = { ...base, raw, events: normalize(oneAtATime ? fillFromVideo(cleaned, vocab) : cleaned), vocab, region, oneAtATime, edited: false, updatedAt: Date.now() };
+    await saveSong(meta);
+    setSong(meta);
+    setSaved(true);
+    setOcrNote(note);
+    setStatus('ready');
+  };
+
   /** Lê os acordes escritos no vídeo e refaz a análise de áudio só entre eles. */
   const readFromVideo = async (region: Region) => {
     if (!song) return;
@@ -168,31 +189,42 @@ export function SongsPage() {
     setError('');
     setOcrNote('');
     try {
-      const blob = await getBlob(song.id);
-      if (!blob) throw new Error('arquivo');
       setStatus('ocr');
       setProgress(0);
       const obs = await scanChords(url, region, { onProgress: setProgress });
-      const vocab = buildVocabulary(obs);
+      const vocab = buildVocabulary(obs, { step: SCAN_STEP });
       if (vocab.length === 0) {
         setStatus('ready');
         setOcrNote('Não consegui ler nenhum acorde nessa região. Marque de novo, mais justo em volta dos nomes.');
         return;
       }
-      setStatus('decoding');
-      const { samples, sampleRate } = await decodeToMono(typed(blob, song.name, song.type) as File);
-      setStatus('analyzing');
-      setProgress(0);
-      const raw = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
-      const level = (song.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (song.cleanLevel as CleanLevel) : 'medio';
-      const meta: SongMeta = { ...song, raw, events: cleanEvents(raw, CLEAN_LEVELS[level]), vocab, region, edited: false, updatedAt: Date.now() };
-      await saveSong(meta);
-      setSong(meta);
-      setSaved(true);
-      setOcrNote(`Li ${new Set(vocab.flatMap((v) => v.names)).size} acordes diferentes no vídeo em ${vocab.length} trecho(s).`);
-      setStatus('ready');
+      const oneAtATime = chordsPerFrame(obs) <= 1;
+      await analyzeWithVocab(
+        song, vocab, region, oneAtATime,
+        `${oneAtATime ? 'O vídeo mostra um acorde por vez.' : 'O vídeo mostra uma lista de acordes.'} Onde a faixa não aparece no começo e no fim, nenhum acorde é aceito. Faltou ou sobrou acorde? Toque em "Acordes do vídeo" para corrigir a lista.`,
+      );
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : 'Não consegui ler os acordes do vídeo.');
+      setStatus('ready');
+    }
+  };
+
+  /** Corrige a lista de acordes lida do vídeo (remove falsos / adiciona os que faltaram) e refaz a análise. */
+  const applyVocabEdit = async (names: Array<{ key: string; name: string }>) => {
+    if (!song?.vocab) return;
+    setVocabEdit(false);
+    const keep = new Set(names.map((n) => n.key));
+    const vocab = song.vocab
+      .map((v) => {
+        const ordered = names.filter((n) => keep.has(n.key));
+        return { ...v, keys: ordered.map((n) => n.key), names: ordered.map((n) => n.name) };
+      })
+      .filter((v) => v.keys.length > 0);
+    if (song.edited && !window.confirm('Isso refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
+    try {
+      await analyzeWithVocab(song, vocab, song.region, !!song.oneAtATime, 'Lista de acordes do vídeo atualizada.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Não consegui refazer a análise.');
       setStatus('ready');
     }
   };
@@ -389,6 +421,24 @@ export function SongsPage() {
                   {follow ? 'Seguindo ✓' : 'Seguir'}
                 </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    const t = video.current?.currentTime ?? 0;
+                    update(events.filter((e) => e.end > t).map((e) => (e.start < t ? { ...e, start: t } : e)));
+                  }}
+                >
+                  ✂ Apagar antes daqui
+                </button>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    const t = video.current?.currentTime ?? 0;
+                    update(events.filter((e) => e.start < t).map((e) => (e.end > t ? { ...e, end: t } : e)));
+                  }}
+                >
+                  ✂ Apagar depois daqui
+                </button>
                 <button className="chip accent" onClick={() => { video.current?.pause(); setPicking(true); }}>
                   Ler acordes do vídeo
                 </button>
@@ -407,9 +457,10 @@ export function SongsPage() {
               {ocrNote && <p className="muted small">{ocrNote}</p>}
               {error && <p className="error small">{error}</p>}
               {song.vocab && song.vocab.length > 0 && (
-                <p className="muted small">
-                  Acordes do vídeo: <b>{[...new Set(song.vocab.flatMap((v) => v.names))].join(' · ')}</b>
-                </p>
+                <button className="vocab-btn" onClick={() => { video.current?.pause(); setVocabEdit(true); }}>
+                  <span className="muted small">ACORDES DO VÍDEO (toque para corrigir)</span>
+                  <span className="vocab-names">{[...new Set(song.vocab.flatMap((v) => v.names))].join(' · ')}</span>
+                </button>
               )}
               {events.length === 0 && (
                 <p className="muted">Nenhum acorde passou pela limpeza. Tente "Limpeza suave".</p>
@@ -432,6 +483,14 @@ export function SongsPage() {
 
       {picking && video.current && (
         <RegionPicker video={video.current} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />
+      )}
+
+      {vocabEdit && song?.vocab && (
+        <VocabEditor
+          initial={[...new Map(song.vocab.flatMap((v) => v.keys.map((k, i) => [k, { key: k, name: v.names[i] ?? k }] as const))).values()]}
+          onCancel={() => setVocabEdit(false)}
+          onApply={(n) => void applyVocabEdit(n)}
+        />
       )}
 
       {ed && editing !== null && (

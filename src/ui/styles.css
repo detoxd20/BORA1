@@ -183,7 +183,24 @@ input[type=range] { width: 100%; height: 40px; accent-color: var(--accent); }
 .lib-name { font-size: 18px; font-weight: 700; word-break: break-word; }
 .timeline { position: relative; }
 .chip.on { border-color: var(--accent); }
-.picker { position: relative; touch-action: none; border-radius: 10px; overflow: hidden; background: #000; }
-.picker canvas { display: block; width: 100%; height: auto; }
-.picker-rect { position: absolute; border: 2px solid var(--accent); background: rgba(245, 165, 36, .18); pointer-events: none; }
-.chip.accent { border-color: var(--accent); color: var(--accent); }
+.picker-full { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; padding: max(10px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
+.picker-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; }
+.picker-body { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.picker-foot { padding-top: 10px; }
+.picker { position: relative; touch-action: none; user-select: none; background: #000; border-radius: 8px; overflow: visible; margin: 14px 14px 6px; }
+.picker canvas { display: block; width: 100%; height: auto; border-radius: 8px; }
+.picker-rect { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55); pointer-events: none; }
+.picker-rect .h { position: absolute; width: 26px; height: 26px; background: var(--accent); border: 3px solid #1a1100; border-radius: 50%; }
+.picker-rect .nw { left: -14px; top: -14px; } .picker-rect .ne { right: -14px; top: -14px; }
+.picker-rect .sw { left: -14px; bottom: -14px; } .picker-rect .se { right: -14px; bottom: -14px; }
+.picker-rect .n { left: calc(50% - 13px); top: -14px; } .picker-rect .s { left: calc(50% - 13px); bottom: -14px; }
+.picker-rect .w { left: -14px; top: calc(50% - 13px); } .picker-rect .e { right: -14px; top: calc(50% - 13px); }
+.scrub { display: flex; flex-direction: column; gap: 2px; }
+.presets { display: flex; gap: 8px; flex-wrap: wrap; }
+.live { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; min-height: 76px; }
+.live-chords { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.live-chip { background: var(--surface-2); border: 1px solid var(--accent); border-radius: 10px; padding: 4px 10px; font-weight: 700; font-size: 18px; }
+.vocab-btn { display: flex; flex-direction: column; gap: 2px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; width: 100%; }
+.vocab-names { font-size: 17px; font-weight: 700; line-height: 1.4; word-break: break-word; }
+.live-chip.removable { color: var(--text); }
+.live-chip.removable span { color: var(--muted); font-size: 13px; margin-left: 4px; }
