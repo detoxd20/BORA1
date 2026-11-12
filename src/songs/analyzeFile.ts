@@ -1,5 +1,6 @@
 import type { ChordEvent } from '../chords/analyzer';
 import type { WorkerOut } from './analysis.worker';
+import type { VocabSegment } from './vocabulary';
 
 /** Decodifica o áudio de um arquivo de vídeo/áudio do usuário, em mono. */
 export async function decodeToMono(file: File): Promise<{ samples: Float32Array; sampleRate: number }> {
@@ -22,6 +23,7 @@ export function analyzeInWorker(
   samples: Float32Array,
   sampleRate: number,
   onProgress: (v: number) => void,
+  vocabulary?: VocabSegment[],
 ): Promise<ChordEvent[]> {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./analysis.worker.ts', import.meta.url), { type: 'module' });
@@ -38,6 +40,6 @@ export function analyzeInWorker(
       w.terminate();
       reject(new Error(e.message));
     };
-    w.postMessage({ samples, sampleRate }, [samples.buffer]);
+    w.postMessage({ samples, sampleRate, vocabulary }, [samples.buffer]);
   });
 }

@@ -1,5 +1,7 @@
 /** Biblioteca local (IndexedDB): guarda o vídeo/áudio e os acordes editados de cada música. */
 import type { ChordEvent } from '../chords/analyzer';
+import type { Region } from '../songs/ocr';
+import type { VocabSegment } from '../songs/vocabulary';
 
 export interface SongMeta {
   id: string;
@@ -15,6 +17,9 @@ export interface SongMeta {
   cleanLevel: string;
   /** O usuário já editou à mão (refazer a limpeza descartaria isso). */
   edited?: boolean;
+  /** Acordes lidos no vídeo, por trecho (quando o usuário usou "Ler acordes do vídeo"). */
+  vocab?: VocabSegment[];
+  region?: Region;
 }
 
 const DB = 'cavaco';

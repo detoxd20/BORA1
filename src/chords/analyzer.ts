@@ -1,6 +1,7 @@
 import { ChromaExtractor } from '../audio/chroma';
 import { ALL_MODELS } from './models';
 import { scoreAll } from './detector';
+import type { VocabSegment } from '../songs/vocabulary';
 
 export interface ChordEvent {
   /** Segundos desde o início do áudio. */
@@ -21,6 +22,10 @@ export interface AnalyzeOptions {
   /** Abaixo disso o quadro é considerado silêncio (dBFS). */
   silenceDb?: number;
   onProgress?: (fraction: number) => void;
+  /** Acordes que o vídeo mostra, por trecho: o áudio só escolhe entre eles. */
+  vocabulary?: VocabSegment[];
+  /** Quanto um acorde fora da lista é penalizado (em log-score). */
+  vocabPenalty?: number;
 }
 
 const N_STATE = ALL_MODELS.length; // 144; o estado extra N_STATE = "sem acorde"
@@ -46,6 +51,8 @@ export function analyzeChords(samples: Float32Array, sampleRate: number, opts: A
     const { chroma, levelDb } = ex.compute(samples, f * hop);
     const e = new Float64Array(N_STATE + 1);
     const isSilent = levelDb < silenceDb;
+    const tFrame = (f * hop + fftSize / 2) / sampleRate;
+    const seg = opts.vocabulary?.find((v) => tFrame >= v.start && tFrame < v.end);
     if (isSilent) {
       e.fill(Math.log(0.05));
       e[N_STATE] = Math.log(0.9);
@@ -54,6 +61,16 @@ export function analyzeChords(samples: Float32Array, sampleRate: number, opts: A
         e[idx.get(`${c.root}:${c.typeId}`) as number] = 4 * Math.log(Math.max(c.score, 1e-3));
       }
       e[N_STATE] = Math.log(0.3) * 4;
+      if (seg) {
+        // Com a lista do vídeo, é melhor "nenhum acorde" do que um acorde da lista que não combina.
+        e[N_STATE] = Math.log(0.55) * 4;
+        const allowed = new Set(seg.keys);
+        const penalty = opts.vocabPenalty ?? 8;
+        for (let k = 0; k < N_STATE; k++) {
+          const m = ALL_MODELS[k]!;
+          if (!allowed.has(`${m.root}:${m.type.id}`)) e[k] = (e[k] as number) - penalty;
+        }
+      }
     }
     emis.push(e);
     if (opts.onProgress && f % 20 === 0) opts.onProgress(f / nFrames);

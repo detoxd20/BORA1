@@ -4,6 +4,9 @@ import { cleanEvents, CLEAN_LEVELS, type CleanLevel } from '../chords/analyzer';
 import { deleteSong, getBlob, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
 import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
+import { DEFAULT_REGION, scanChords, type Region } from '../songs/ocr';
+import { buildVocabulary } from '../songs/vocabulary';
+import { RegionPicker } from './RegionPicker';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 
 const MIME: Record<string, string> = {
@@ -25,7 +28,7 @@ const MEDIA_ERRORS: Record<number, string> = {
   4: 'o celular não consegue tocar este formato de vídeo (ex.: HEVC/H.265, MKV)',
 };
 
-type Status = 'idle' | 'decoding' | 'analyzing' | 'ready' | 'error';
+type Status = 'idle' | 'decoding' | 'ocr' | 'analyzing' | 'ready' | 'error';
 
 /** Mantém a lista ordenada e sem sobreposição de tempos. */
 function normalize(list: ChordEvent[]): ChordEvent[] {
@@ -48,6 +51,8 @@ export function SongsPage() {
   const [saved, setSaved] = useState(true);
   const [mediaErr, setMediaErr] = useState('');
   const [follow, setFollow] = useState(true);
+  const [picking, setPicking] = useState(false);
+  const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<number>(0);
@@ -102,7 +107,7 @@ export function SongsPage() {
       setProgress(0);
       const { samples, sampleRate } = await decodeToMono(file as File);
       setStatus('analyzing');
-      const raw = await analyzeInWorker(samples, sampleRate, setProgress);
+      const raw = await analyzeInWorker(samples, sampleRate, setProgress, base.vocab);
       const meta: SongMeta = { ...base, raw, events: cleanEvents(raw, CLEAN_LEVELS[level]), cleanLevel: level, edited: false, updatedAt: Date.now() };
       await saveSong(meta, file);
       setSong(meta);
@@ -152,6 +157,44 @@ export function SongsPage() {
     if (url) URL.revokeObjectURL(url);
     setMediaErr('');
     setUrl(URL.createObjectURL(copy));
+  };
+
+  /** Lê os acordes escritos no vídeo e refaz a análise de áudio só entre eles. */
+  const readFromVideo = async (region: Region) => {
+    if (!song) return;
+    setPicking(false);
+    if (song.edited && !window.confirm('Isso refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
+    video.current?.pause();
+    setError('');
+    setOcrNote('');
+    try {
+      const blob = await getBlob(song.id);
+      if (!blob) throw new Error('arquivo');
+      setStatus('ocr');
+      setProgress(0);
+      const obs = await scanChords(url, region, { onProgress: setProgress });
+      const vocab = buildVocabulary(obs);
+      if (vocab.length === 0) {
+        setStatus('ready');
+        setOcrNote('Não consegui ler nenhum acorde nessa região. Marque de novo, mais justo em volta dos nomes.');
+        return;
+      }
+      setStatus('decoding');
+      const { samples, sampleRate } = await decodeToMono(typed(blob, song.name, song.type) as File);
+      setStatus('analyzing');
+      setProgress(0);
+      const raw = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
+      const level = (song.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (song.cleanLevel as CleanLevel) : 'medio';
+      const meta: SongMeta = { ...song, raw, events: cleanEvents(raw, CLEAN_LEVELS[level]), vocab, region, edited: false, updatedAt: Date.now() };
+      await saveSong(meta);
+      setSong(meta);
+      setSaved(true);
+      setOcrNote(`Li ${new Set(vocab.flatMap((v) => v.names)).size} acordes diferentes no vídeo em ${vocab.length} trecho(s).`);
+      setStatus('ready');
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Não consegui ler os acordes do vídeo.');
+      setStatus('ready');
+    }
   };
 
   const update = (next: ChordEvent[]) => {
@@ -294,11 +337,11 @@ export function SongsPage() {
             </div>
           )}
 
-          {(status === 'decoding' || status === 'analyzing') && (
+          {(status === 'decoding' || status === 'analyzing' || status === 'ocr') && (
             <div className="progress-card">
               <div className="dbg-row">
-                <span>{status === 'decoding' ? 'Lendo o áudio…' : 'Descobrindo os acordes…'}</span>
-                <b>{status === 'analyzing' ? `${Math.round(progress * 100)}%` : ''}</b>
+                <span>{status === 'decoding' ? 'Lendo o áudio…' : status === 'ocr' ? 'Lendo os acordes escritos no vídeo…' : 'Descobrindo os acordes…'}</span>
+                <b>{status !== 'decoding' ? `${Math.round(progress * 100)}%` : ''}</b>
               </div>
               <div className="level"><div className="level-bar" style={{ width: `${status === 'decoding' ? 5 : progress * 100}%` }} /></div>
             </div>
@@ -346,6 +389,9 @@ export function SongsPage() {
                   {follow ? 'Seguindo ✓' : 'Seguir'}
                 </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
+                <button className="chip accent" onClick={() => { video.current?.pause(); setPicking(true); }}>
+                  Ler acordes do vídeo
+                </button>
                 <button
                   className="chip"
                   onClick={() => {
@@ -358,6 +404,13 @@ export function SongsPage() {
                   + Acorde aqui
                 </button>
               </div>
+              {ocrNote && <p className="muted small">{ocrNote}</p>}
+              {error && <p className="error small">{error}</p>}
+              {song.vocab && song.vocab.length > 0 && (
+                <p className="muted small">
+                  Acordes do vídeo: <b>{[...new Set(song.vocab.flatMap((v) => v.names))].join(' · ')}</b>
+                </p>
+              )}
               {events.length === 0 && (
                 <p className="muted">Nenhum acorde passou pela limpeza. Tente "Limpeza suave".</p>
               )}
@@ -375,6 +428,10 @@ export function SongsPage() {
             </>
           )}
         </div>
+      )}
+
+      {picking && video.current && (
+        <RegionPicker video={video.current} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />
       )}
 
       {ed && editing !== null && (

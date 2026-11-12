@@ -32,6 +32,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,ogg,wav}'],
+        // O OCR (~15 MB) só baixa quando usado e fica em cache depois
+        globIgnores: ['ocr/**'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        runtimeCaching: [
+          { urlPattern: ({ url }) => url.pathname.includes('/ocr/'), handler: 'CacheFirst', options: { cacheName: 'ocr', expiration: { maxEntries: 8 } } },
+        ],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
