@@ -1,107 +1,134 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SongMeta } from '../storage/library';
 import { activeIndex } from '../songs/types';
-import { ChordDiagram, chordHue } from './ChordDiagram';
-import { shapeKey } from '../chords/shapes';
+import { resolveShape, shapeKey } from '../chords/shapes';
 import { loadShapePrefs } from '../storage/shapePrefs';
+import { drawHighway, LANE_COLORS, makeGeometry, SmoothClock, spawnSparks, stepParticles, type Flash, type GameChord, type Geometry, type Particle } from '../game/highway';
+import { ChordDiagram, chordHue } from './ChordDiagram';
 import { useWakeLock } from './useWakeLock';
 
 interface Props {
   song: SongMeta;
   /** O MESMO player da tela da música (um só vídeo aberto: Android limita decodificadores simultâneos). */
-  media: React.RefObject<HTMLMediaElement | null>;
+  media: RefObject<HTMLMediaElement | null>;
   /** Mensagem de falha do player, se houver. */
   problem: string;
   onAudioOnly?: () => void;
   onClose: () => void;
 }
 
-/** Quantos segundos da música ficam visíveis acima da linha de acerto. */
-const LOOKAHEAD = 5;
-const HIT_FRAC = 0.8;
+type Phase = 'title' | 'count' | 'play' | 'paused' | 'ended';
 const RATES = [0.5, 0.75, 1];
 
 export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props) {
-  const events = useMemo(() => [...song.events].sort((a, b) => a.start - b.start), [song.events]);
-  const onsets = useMemo(() => song.onsets ?? [], [song.onsets]);
-  const maxStrength = useMemo(() => Math.max(1e-6, ...onsets.map((o) => o.strength)), [onsets]);
-
-  // Forma de cada acorde: a escolhida nesta música, senão o padrão do usuário, senão a melhor pela regra
-  const prefs = useMemo(() => ({ ...loadShapePrefs(), ...(song.shapes ?? {}) }), [song.shapes]);
-  const fretsOf = (root: number, typeId: string) => prefs[shapeKey(root, typeId)];
   useWakeLock(true);
 
-  const lane = useRef<HTMLDivElement>(null);
-  const track = useRef<HTMLDivElement>(null);
-  const slider = useRef<HTMLInputElement>(null);
-  const dragging = useRef(false);
-  const geom = useRef({ h: 600 });
+  // Acordes da música já com a forma (casas por corda) que o jogador escolheu
+  const evs = useMemo(() => [...song.events].sort((a, b) => a.start - b.start), [song.events]);
+  const chords = useMemo<GameChord[]>(() => {
+    const prefs = { ...loadShapePrefs(), ...(song.shapes ?? {}) };
+    return evs.map((e) => ({ start: e.start, end: e.end, name: e.name, root: e.root, frets: resolveShape(e.root, e.typeId, prefs[shapeKey(e.root, e.typeId)])?.frets ?? null }));
+  }, [evs, song.shapes]);
+  const prefs = useMemo(() => ({ ...loadShapePrefs(), ...(song.shapes ?? {}) }), [song.shapes]);
+  const strums = useMemo(() => (song.onsets ?? []).map((o) => o.t), [song.onsets]);
 
-  const [started, setStarted] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [ended, setEnded] = useState(false);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const slider = useRef<HTMLInputElement>(null);
+  const geom = useRef<Geometry>(makeGeometry(390, 844));
+
+  const [phase, setPhase] = useState<Phase>('title');
+  const phaseRef = useRef<Phase>('title');
+  phaseRef.current = phase;
+  const [count, setCount] = useState(3);
   const [rate, setRate] = useState(1);
   const [cur, setCur] = useState(-1);
-  const [tick, setTick] = useState(0); // muda a cada 1 s: decide quais cartas existem na tela
-  const [laneH, setLaneH] = useState(600);
 
-  const hitY = laneH * HIT_FRAC;
-  const pps = hitY / LOOKAHEAD;
-
+  // Tamanho do canvas (nítido, mas sem exagerar nos pixels: no máximo 1,5× por causa do desempenho)
   useEffect(() => {
-    const el = lane.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      geom.current.h = el.clientHeight;
-      setLaneH(el.clientHeight);
-    });
+    const el = stage.current;
+    const cv = canvas.current;
+    if (!el || !cv) return;
+    const fit = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      cv.width = Math.round(el.clientWidth * dpr);
+      cv.height = Math.round(el.clientHeight * dpr);
+      geom.current = makeGeometry(el.clientWidth, el.clientHeight);
+      cv.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(el);
-    geom.current.h = el.clientHeight;
-    setLaneH(el.clientHeight);
+    fit();
     return () => ro.disconnect();
   }, []);
 
-  // Laço de animação: move a pista inteira com UMA transformação (suave, sem re-renderizar a cada quadro)
+  // Laço do jogo
   useEffect(() => {
+    const clock = new SmoothClock();
     let raf = 0;
+    let lastT = -1;
+    let lastNow = performance.now();
     let lastCur = -2;
-    let lastTick = -1;
-    const loop = () => {
+    let flashes: Flash[] = [];
+    let particles: Particle[] = [];
+    const loop = (nowMs: number) => {
       const m = media.current;
-      if (m) {
-        const t = m.currentTime;
-        const h = geom.current.h * HIT_FRAC;
-        if (track.current) track.current.style.transform = `translate3d(0, ${h + t * (h / LOOKAHEAD)}px, 0)`;
-        const i = activeIndex(events, t);
+      const cv = canvas.current;
+      const ctx = cv?.getContext('2d');
+      if (m && ctx) {
+        const playing = !m.paused && !m.ended;
+        const t = clock.read(m.currentTime, nowMs, playing, m.playbackRate);
+        const dt = Math.min(0.05, (nowMs - lastNow) / 1000);
+        lastNow = nowMs;
+        const now = nowMs / 1000;
+        const g = geom.current;
+
+        // acordes que acabaram de cruzar a linha → clarão e faíscas nas 4 cordas
+        if (playing && lastT >= 0 && t > lastT && t - lastT < 0.3) {
+          for (const c of chords) {
+            if (c.start > lastT && c.start <= t) {
+              for (let l = 0; l < 4; l++) {
+                flashes.push({ lane: l, at: now });
+                spawnSparks(g, l, particles);
+              }
+            }
+          }
+        }
+        lastT = t;
+        flashes = flashes.filter((f) => now - f.at < 0.4);
+        particles = stepParticles(particles, dt);
+
+        drawHighway(ctx, g, { t, now, chords, strums, flashes, particles });
+
+        const i = activeIndex(evs, t);
         if (i !== lastCur) {
           lastCur = i;
           setCur(i);
         }
-        const tk = Math.floor(t);
-        if (tk !== lastTick) {
-          lastTick = tk;
-          setTick(tk);
+        if (m.duration) {
+          const frac = Math.min(1, t / m.duration);
+          if (bar.current) bar.current.style.transform = `scaleX(${frac})`;
+          if (slider.current && document.activeElement !== slider.current) slider.current.value = String(frac * 1000);
         }
-        if (slider.current && !dragging.current && m.duration) slider.current.value = String((t / m.duration) * 1000);
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [events]);
+  }, [chords, evs, strums, media]);
 
   // Acompanha o player compartilhado
   useEffect(() => {
     const m = media.current;
     if (!m) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onEnded = () => setEnded(true);
-    m.addEventListener('play', onPlay);
+    const onPause = () => {
+      if (phaseRef.current === 'play' && !m.ended) setPhase('paused');
+    };
+    const onEnded = () => setPhase('ended');
     m.addEventListener('pause', onPause);
     m.addEventListener('ended', onEnded);
     return () => {
-      m.removeEventListener('play', onPlay);
       m.removeEventListener('pause', onPause);
       m.removeEventListener('ended', onEnded);
       m.pause();
@@ -109,165 +136,159 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
     };
   }, [media]);
 
-  const start = () => {
+  // Contagem 3-2-1 antes de tocar
+  useEffect(() => {
+    if (phase !== 'count') return;
+    if (count === 0) {
+      const m = media.current;
+      if (m) {
+        m.playbackRate = rate;
+        void m.play();
+      }
+      setPhase('play');
+      return;
+    }
+    const id = window.setTimeout(() => setCount((c) => c - 1), 650);
+    return () => window.clearTimeout(id);
+  }, [phase, count, media, rate]);
+
+  const begin = (fromStart: boolean) => {
     const m = media.current;
-    if (!m) return;
-    setStarted(true);
-    setEnded(false);
-    m.playbackRate = rate;
-    void m.play();
+    if (m && fromStart) m.currentTime = 0;
+    setCount(3);
+    setPhase('count');
   };
-  const toggle = () => {
-    const m = media.current;
-    if (!m) return;
-    if (m.paused) void m.play();
-    else m.pause();
+  const pause = () => {
+    media.current?.pause();
+    setPhase('paused');
   };
   const seekBy = (d: number) => {
     const m = media.current;
     if (m) m.currentTime = Math.max(0, Math.min((m.duration || 1e9) - 0.1, m.currentTime + d));
   };
-  const cycleRate = () => {
-    const next = RATES[(RATES.indexOf(rate) + 1) % RATES.length] as number;
-    setRate(next);
-    if (media.current) media.current.playbackRate = next;
+  const pickRate = (r: number) => {
+    setRate(r);
+    if (media.current) media.current.playbackRate = r;
   };
 
-  // Só recalcula quais cartas existem 1×/s (com folga), e NUNCA muda o estilo de uma carta já desenhada:
-  // mexer nas cartas a cada troca de acorde obrigava o celular a redesenhar a pista inteira (engasgo).
-  const { visible, visibleOnsets, seconds } = useMemo(() => {
-    const t = tick;
-    const secs: number[] = [];
-    for (let s = Math.floor(t - 3); s <= Math.ceil(t + LOOKAHEAD + 3); s++) if (s >= 0) secs.push(s);
-    return {
-      visible: events.map((e, i) => ({ e, i })).filter(({ e }) => e.end > t - 3.5 && e.start < t + LOOKAHEAD + 3),
-      visibleOnsets: onsets.filter((o) => o.t > t - 2.5 && o.t < t + LOOKAHEAD + 2.5),
-      seconds: secs,
-    };
-  }, [tick, events, onsets]);
+  const nowEv = cur >= 0 ? evs[cur] : undefined;
+  const nextIdx = cur >= 0 ? cur + 1 : evs.findIndex((c) => c.start > (media.current?.currentTime ?? 0));
+  const nextEv = nextIdx >= 0 ? evs[nextIdx] : undefined;
+  const done = Math.max(0, cur + 1);
 
-  const now = cur >= 0 ? events[cur] : undefined;
-  const next = events[cur >= 0 ? cur + 1 : 0];
   return (
-    <div className="game" role="dialog" aria-label="Modo jogo">
+    <div className="game" role="dialog" aria-label="Cavaco Hero">
       <div className="game-shade" />
+      <div className="g-progress"><div ref={bar} /></div>
 
-      <div className="game-top">
-        <button className="game-x" onClick={onClose} aria-label="Sair do jogo">✕</button>
-        <div className="game-title">{song.name}</div>
-        <button className="game-rate" onClick={cycleRate} aria-label="Velocidade">{rate}×</button>
+      <div className="g-top">
+        <button className="g-pause" onClick={pause} aria-label="Pausar" disabled={phase !== 'play'}>
+          <span /><span />
+        </button>
+        <div className="g-song">{song.name}</div>
+        <div className="g-counter">
+          <b>{done}</b>/{chords.length}
+          <small>ACORDES</small>
+        </div>
       </div>
 
-      <div className="game-hud">
-        <div className="hud-now">
+      <div className="g-hud">
+        <div className="g-panel now" style={{ ['--c' as string]: nowEv ? `hsl(${chordHue(nowEv.root)} 90% 62%)` : '#8b96a3' }}>
           <small>AGORA</small>
-          {now ? (
-            <div className="hud-row" style={{ ['--c' as string]: `hsl(${chordHue(now.root)} 85% 62%)` }}>
-              <span className="hud-name">{now.name}</span>
-              <ChordDiagram root={now.root} typeId={now.typeId} frets={fretsOf(now.root, now.typeId)} height={128} color={`hsl(${chordHue(now.root)} 85% 62%)`} />
-            </div>
-          ) : (
-            <div className="hud-row"><span className="hud-name dim">—</span></div>
-          )}
+          <div className="g-panel-row">
+            <span key={cur} className="g-chord pop">{nowEv ? nowEv.name : '—'}</span>
+            {nowEv && <ChordDiagram root={nowEv.root} typeId={nowEv.typeId} frets={prefs[shapeKey(nowEv.root, nowEv.typeId)]} height={104} color={`hsl(${chordHue(nowEv.root)} 90% 62%)`} />}
+          </div>
         </div>
-        <div className="hud-next">
+        <div className="g-panel next">
           <small>PRÓXIMO</small>
-          {next ? (
-            <div className="hud-row">
-              <span className="hud-name sm">{next.name}</span>
-              <ChordDiagram root={next.root} typeId={next.typeId} frets={fretsOf(next.root, next.typeId)} height={84} color={`hsl(${chordHue(next.root)} 85% 62%)`} />
-            </div>
-          ) : (
-            <div className="hud-row"><span className="hud-name sm dim">fim</span></div>
-          )}
+          <div className="g-panel-row">
+            <span className="g-chord sm">{nextEv ? nextEv.name : 'fim'}</span>
+            {nextEv && <ChordDiagram root={nextEv.root} typeId={nextEv.typeId} frets={prefs[shapeKey(nextEv.root, nextEv.typeId)]} height={72} showNotes={false} color={`hsl(${chordHue(nextEv.root)} 90% 62%)`} />}
+          </div>
         </div>
       </div>
 
-      <div className="game-lane" ref={lane} onClick={() => started && toggle()}>
-        <div className="lane-bg" />
-        <div className="game-track" ref={track}>
-          {seconds.map((s) => (
-            <div key={`s${s}`} className="beat" style={{ top: -s * pps }} />
+      <div className="g-stage" ref={stage} onClick={() => phase === 'play' && pause()}>
+        <canvas ref={canvas} />
+        <div className="g-strings" aria-hidden>
+          {['4ª', '3ª', '2ª', '1ª'].map((s, i) => (
+            <span key={s} style={{ color: LANE_COLORS[i] }}>{s}</span>
           ))}
-          {visibleOnsets.map((o, i) => (
-            <div key={`o${i}-${o.t}`} className="strum" style={{ top: -o.t * pps, opacity: 0.15 + 0.5 * (o.strength / maxStrength) }} />
-          ))}
-          {visible.map(({ e, i }) => {
-            // A carta tem EXATAMENTE a altura do tempo do acorde: nunca invade a carta vizinha.
-            // Acorde curto → carta baixa, só com o nome; muito curto → só uma faixa colorida.
-            const h = Math.max((e.end - e.start) * pps - 3, 6);
-            const hue = chordHue(e.root);
-            const c = `hsl(${hue} 85% 62%)`;
-            const size = h >= 64 ? 34 : Math.max(11, Math.min(24, h - 6));
-            return (
-              <div
-                key={`${e.start}-${i}`}
-                className={h < 26 ? 'gcard thin' : 'gcard'}
-                style={{ top: -e.start * pps - h, height: h, ['--c' as string]: c, ['--bg' as string]: `hsl(${hue} 60% 22%)` }}
-              >
-                {h >= 16 && <span className="gcard-name" style={{ fontSize: size }}>{e.name}</span>}
-                {h >= 60 && <ChordDiagram root={e.root} typeId={e.typeId} frets={fretsOf(e.root, e.typeId)} height={Math.min(h - 8, 124)} showNotes={h >= 104} color={c} />}
-              </div>
-            );
-          })}
-        </div>
-        <div className="past-shade" style={{ top: hitY }} />
-        <div className="hit-line" style={{ top: hitY, ['--c' as string]: now ? `hsl(${chordHue(now.root)} 85% 62%)` : 'var(--accent)' }}>
-          <span>ACERTE AQUI</span>
-        </div>
-      </div>
-
-      <div className="game-controls">
-        <input
-          ref={slider}
-          type="range"
-          min={0}
-          max={1000}
-          defaultValue={0}
-          className="game-slider"
-          aria-label="Posição da música"
-          onPointerDown={() => (dragging.current = true)}
-          onPointerUp={() => (dragging.current = false)}
-          onChange={(e) => {
-            const m = media.current;
-            if (m?.duration) m.currentTime = (Number(e.target.value) / 1000) * m.duration;
-          }}
-        />
-        <div className="game-buttons">
-          <button className="g-btn" onClick={() => seekBy(-5)} aria-label="Voltar 5 segundos">⏪ 5s</button>
-          <button className="g-btn big" onClick={() => (started ? toggle() : start())} aria-label={playing ? 'Pausar' : 'Tocar'}>
-            {playing ? '⏸' : '▶'}
-          </button>
-          <button className="g-btn" onClick={() => seekBy(5)} aria-label="Avançar 5 segundos">5s ⏩</button>
         </div>
       </div>
 
       {problem && (
-        <div className="game-overlay">
-          <div className="overlay-card">
+        <div className="g-overlay">
+          <div className="g-menu">
             <h2>O vídeo não tocou</h2>
             <pre className="diag">{problem}</pre>
-            {onAudioOnly && <button className="btn primary" onClick={onAudioOnly}>Jogar só com o áudio</button>}
-            <button className="btn" onClick={onClose}>Sair</button>
+            {onAudioOnly && <button className="g-btn primary" onClick={onAudioOnly}>JOGAR SÓ COM O ÁUDIO</button>}
+            <button className="g-btn" onClick={onClose}>SAIR</button>
           </div>
         </div>
       )}
-      {!started && !problem && (
-        <div className="game-overlay">
-          <div className="overlay-card">
-            <h2>{song.name}</h2>
-            <p className="muted">Siga os acordes que descem até a linha. Cada um mostra a formação no braço do cavaquinho.</p>
-            <p className="muted small">Modo visual: ainda sem pontuação pelo som do cavaco. Use fones para o vídeo não atrapalhar.</p>
-            <button className="btn primary" onClick={start}>▶ Começar</button>
+
+      {!problem && phase === 'title' && (
+        <div className="g-overlay">
+          <div className="g-menu">
+            <div className="g-logo">CAVACO<span>HERO</span></div>
+            <div className="g-songname">{song.name}</div>
+            <p className="g-note">{chords.length} acordes · as 4 pistas são as 4 cordas, e o número em cada nota é a casa</p>
+            <button className="g-btn primary" onClick={() => begin(false)}>▶ TOCAR</button>
+            <button className="g-btn" onClick={onClose}>VOLTAR</button>
+            <p className="g-note dim">Demonstração: ainda não ouve o seu cavaco, então não há pontuação. Use fones.</p>
           </div>
         </div>
       )}
-      {ended && (
-        <div className="game-overlay">
-          <div className="overlay-card">
-            <h2>Fim da música</h2>
-            <button className="btn primary" onClick={() => { seekBy(-1e9); start(); }}>Jogar de novo</button>
-            <button className="btn" onClick={onClose}>Sair</button>
+
+      {!problem && phase === 'count' && (
+        <div className="g-overlay clear">
+          <div key={count} className="g-count">{count > 0 ? count : 'VAI!'}</div>
+        </div>
+      )}
+
+      {!problem && phase === 'paused' && (
+        <div className="g-overlay">
+          <div className="g-menu">
+            <h2>PAUSADO</h2>
+            <button className="g-btn primary" onClick={() => begin(false)}>▶ CONTINUAR</button>
+            <input
+              ref={slider}
+              type="range"
+              min={0}
+              max={1000}
+              defaultValue={0}
+              className="g-slider"
+              aria-label="Posição da música"
+              onChange={(e) => {
+                const m = media.current;
+                if (m?.duration) m.currentTime = (Number(e.target.value) / 1000) * m.duration;
+              }}
+            />
+            <div className="g-row">
+              <button className="g-btn" onClick={() => seekBy(-5)}>⏪ 5 s</button>
+              <button className="g-btn" onClick={() => seekBy(5)}>5 s ⏩</button>
+            </div>
+            <div className="g-row three">
+              {RATES.map((r) => (
+                <button key={r} className={`g-btn ${rate === r ? 'on' : ''}`} onClick={() => pickRate(r)}>{r}×</button>
+              ))}
+            </div>
+            <button className="g-btn" onClick={() => begin(true)}>↺ REINICIAR</button>
+            <button className="g-btn" onClick={onClose}>SAIR</button>
+          </div>
+        </div>
+      )}
+
+      {!problem && phase === 'ended' && (
+        <div className="g-overlay">
+          <div className="g-menu">
+            <div className="g-logo small">MÚSICA<span>COMPLETA!</span></div>
+            <div className="g-songname">{song.name}</div>
+            <p className="g-note">{chords.length} acordes tocados na pista</p>
+            <button className="g-btn primary" onClick={() => begin(true)}>↺ JOGAR DE NOVO</button>
+            <button className="g-btn" onClick={onClose}>SAIR</button>
           </div>
         </div>
       )}

@@ -49,6 +49,13 @@ Formas preferidas (feito): `ShapePicker` (botão "🎸 Formas") lista os acordes
 `resolveShape` ignora preferência inválida (nunca mostra diagrama errado). Engasgo nas trocas: cartas da pista NÃO mudam de estilo ao trocar de acorde (evita re-rasterizar a pista), sem backdrop-filter,
 janela de cartas recalculada 1×/s; medição no desktop com CPU 4× mais lenta: pior quadro 33→16,8 ms. Efeito no Android real não confirmado.
 Próximo: detector ao vivo (mic) + pontuação por tempo/acerto sobre a pista; calibração de latência.
+CAVACO HERO (visual do jogo refeito a pedido do dono: "parecer jogo de fato, não ferramenta"): `src/game/highway.ts` desenha em CANVAS uma pista em perspectiva (braço se afastando) com as 4 cordas
+como 4 pistas coloridas (verde/vermelho/amarelo/azul = 4ª→1ª); cada acorde chega como 4 GEMAS com o NÚMERO DA CASA de cada corda (corda solta = anel vazado "0") + barra na cor do acorde + nome; rastros
+finos com a duração; 4 alvos na linha de acerto com clarão, onda de choque e faíscas quando o acorde cruza (demonstração: ainda sem microfone/pontuação — está escrito na tela de título).
+`GameScreen`: fases title (logo) → count (3-2-1) → play → paused (menu: continuar, posição, ±5 s, velocidade, reiniciar, sair) → ended. HUD: barra de progresso, contador de acordes, painéis AGORA/PRÓXIMO com diagrama.
+`SmoothClock`: o jogo avança pelo relógio de alta precisão e se realinha aos poucos com o vídeo (currentTime anda aos saltos no Android) — testado com saltos de 250 ms.
+DESEMPENHO DO CANVAS (regra): nada de shadowBlur nem degradê criado por quadro; gemas e nomes são sprites pré-desenhados (drawImage); degradês em cache por geometria; DPR do canvas ≤ 1,5.
+Medição (Chromium, CPU 4× mais lenta): 57 → 19,5 ms/quadro após otimizar; sem throttle 16,7 ms cravado. Não medido em Android real.
 UM SÓ PLAYER (regra): Android limita decodificadores de vídeo simultâneos. O <video> da tela da música é o ÚNICO: no jogo ele vira o fundo (classe `game-bg`, fixed, z-39; `GameScreen` recebe a ref
 `media` e só escuta eventos) e a leitura de acordes usa o mesmo elemento (`acquire()` em `ocr.ts`, restaura a posição). Nunca criar outro <video> com o arquivo. Falha de player aparece dentro do jogo
 com diagnóstico e "Jogar só com o áudio". (Hipótese para "vídeo não dá play" no celular — não confirmada no aparelho.)
