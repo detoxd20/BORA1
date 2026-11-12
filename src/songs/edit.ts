@@ -19,14 +19,35 @@ export function removeChord(events: ChordEvent[], index: number, prefer: 'prev' 
   if (useNext && next) next.start = Math.min(next.start, removed.start);
   else if (prev) prev.end = Math.max(prev.end, removed.end);
 
-  // Mesmo acorde dos dois lados (e agora colados): junta
+  return mergeRepeats(out);
+}
+
+/**
+ * Acordes iguais vizinhos (mesmo nome, com no máximo `maxGap` segundos entre eles) viram UM só bloco de tempo:
+ * do começo do primeiro ao fim do último. Mais fácil de sincronizar do que várias repetições coladas.
+ */
+export function mergeRepeats(events: ChordEvent[], maxGap = 1): ChordEvent[] {
   const merged: ChordEvent[] = [];
-  for (const e of out) {
+  for (const e of [...events].sort((a, b) => a.start - b.start)) {
     const last = merged[merged.length - 1];
-    if (last && same(last, e) && e.start - last.end <= 0.01) {
+    if (last && same(last, e) && e.start - last.end <= maxGap) {
       last.end = Math.max(last.end, e.end);
       last.confidence = Math.min(last.confidence, e.confidence);
-    } else merged.push(e);
+    } else merged.push({ ...e });
   }
   return merged;
+}
+
+/** Troca o acorde `index` por outro; se ficar igual ao vizinho, os dois viram um bloco só. Devolve também o novo índice. */
+export function retypeChord(
+  events: ChordEvent[],
+  index: number,
+  next: { root: number; typeId: string; name: string },
+): { events: ChordEvent[]; index: number } {
+  const target = events[index];
+  if (!target) return { events, index };
+  const changed = events.map((e, i) => (i === index ? { ...e, ...next, confidence: 1 } : e));
+  const merged = mergeRepeats(changed);
+  const at = merged.findIndex((e) => e.start <= target.start && e.end > target.start);
+  return { events: merged, index: at >= 0 ? at : Math.min(index, merged.length - 1) };
 }

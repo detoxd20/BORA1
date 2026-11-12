@@ -9,7 +9,7 @@ import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } fro
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
-import { removeChord } from '../songs/edit';
+import { mergeRepeats, removeChord, retypeChord } from '../songs/edit';
 
 const MIME: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', '3gp': 'video/3gpp',
@@ -174,7 +174,7 @@ export function SongsPage() {
     const raw = await analyzeInWorker(samples, sampleRate, setProgress, vocab);
     const level = (base.cleanLevel as CleanLevel) in CLEAN_LEVELS ? (base.cleanLevel as CleanLevel) : 'medio';
     const cleaned = cleanEvents(raw, CLEAN_LEVELS[level]);
-    const meta: SongMeta = { ...base, raw, events: normalize(oneAtATime ? fillFromVideo(cleaned, vocab) : cleaned), vocab, region, oneAtATime, edited: false, updatedAt: Date.now() };
+    const meta: SongMeta = { ...base, raw, events: normalize(mergeRepeats(oneAtATime ? fillFromVideo(cleaned, vocab) : cleaned)), vocab, region, oneAtATime, edited: false, updatedAt: Date.now() };
     await saveSong(meta);
     setSong(meta);
     setSaved(true);
@@ -320,7 +320,10 @@ export function SongsPage() {
 
   const setChord = (i: number, root: number, typeId: string) => {
     const type = CHORD_TYPES.find((t) => t.id === typeId)!;
-    update(events.map((e, k) => (k === i ? { ...e, root, typeId, name: chordName(root, type), confidence: 1 } : e)));
+    const r = retypeChord(events, i, { root, typeId, name: chordName(root, type) });
+    if (!song) return;
+    commit({ ...song, events: r.events, edited: true });
+    setEditing(r.index); // se virou um bloco só com o vizinho, segue editando o bloco
   };
 
   return (
