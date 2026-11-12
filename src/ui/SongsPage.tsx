@@ -690,7 +690,11 @@ export function SongsPage() {
       )}
 
       {gaming && <div className="game-backdrop" />}
-      {gaming && song && <GameScreen key={audioOnly ? "a" : "v"} song={song} media={video} problem={mediaErr} onAudioOnly={audioOnly ? undefined : () => { setMediaErr(''); setAudioOnly(true); }} onClose={() => setGaming(false)} />}
+      {gaming && song && <GameScreen key={audioOnly ? "a" : "v"} song={song} media={video} problem={mediaErr} onAudioOnly={audioOnly ? undefined : () => { setMediaErr(''); setAudioOnly(true); }} onResult={(r) => {
+            // guarda só o melhor resultado
+            if (!song.best || r.score > song.best.score) commit({ ...song, best: { ...r, at: Date.now() } }, { noHistory: true });
+          }}
+          onClose={() => setGaming(false)} />}
 
       {picking && video.current && (
         <RegionPicker video={video.current as HTMLVideoElement} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />

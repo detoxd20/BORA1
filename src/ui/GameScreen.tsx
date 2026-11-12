@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SongMeta } from '../storage/library';
 import { activeIndex } from '../songs/types';
+import { CHORD_TYPES } from '../chords/models';
 import { resolveShape, shapeKey } from '../chords/shapes';
+import { getTuning } from '../tuner/tunings';
 import { loadShapePrefs } from '../storage/shapePrefs';
+import { ChordListener } from '../audio/chordListener';
 import { drawHighway, LANE_COLORS, makeGeometry, SmoothClock, spawnSparks, stepParticles, type Flash, type GameChord, type Geometry, type Particle } from '../game/highway';
+import { ScoreEngine, shapeTemplate, type Grade, type Judgement, type ScoreSummary, type Target } from '../game/scoring';
 import { ChordDiagram, chordHue } from './ChordDiagram';
 import { useWakeLock } from './useWakeLock';
 
@@ -14,23 +18,59 @@ interface Props {
   /** Mensagem de falha do player, se houver. */
   problem: string;
   onAudioOnly?: () => void;
+  /** Resultado de uma partida completa com microfone. */
+  onResult?: (r: { score: number; accuracy: number; stars: number }) => void;
   onClose: () => void;
 }
 
 type Phase = 'title' | 'count' | 'play' | 'paused' | 'ended';
 const RATES = [0.5, 0.75, 1];
+const LATENCY_KEY = 'cavaco:latencyMs';
+const GRADE_TEXT: Record<Grade, { text: string; color: string }> = {
+  perfeito: { text: 'PERFEITO!', color: '#ffd23f' },
+  bom: { text: 'BOM!', color: '#2ee66b' },
+  ok: { text: 'ATRASADO', color: '#3fa9ff' },
+  erro: { text: 'ERROU', color: '#ff4d5a' },
+};
 
-export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props) {
+function loadLatency(): number {
+  try {
+    const v = Number(localStorage.getItem(LATENCY_KEY));
+    return Number.isFinite(v) && v >= 0 && v <= 600 && localStorage.getItem(LATENCY_KEY) !== null ? v : 120;
+  } catch {
+    return 120;
+  }
+}
+
+export function GameScreen({ song, media, problem, onAudioOnly, onResult, onClose }: Props) {
   useWakeLock(true);
 
-  // Acordes da música já com a forma (casas por corda) que o jogador escolheu
   const evs = useMemo(() => [...song.events].sort((a, b) => a.start - b.start), [song.events]);
-  const chords = useMemo<GameChord[]>(() => {
-    const prefs = { ...loadShapePrefs(), ...(song.shapes ?? {}) };
-    return evs.map((e) => ({ start: e.start, end: e.end, name: e.name, root: e.root, frets: resolveShape(e.root, e.typeId, prefs[shapeKey(e.root, e.typeId)])?.frets ?? null }));
-  }, [evs, song.shapes]);
   const prefs = useMemo(() => ({ ...loadShapePrefs(), ...(song.shapes ?? {}) }), [song.shapes]);
+  // Acordes da música já com a forma (casas por corda) que o jogador escolheu
+  const chords = useMemo<GameChord[]>(
+    () => evs.map((e) => ({ start: e.start, end: e.end, name: e.name, root: e.root, frets: resolveShape(e.root, e.typeId, prefs[shapeKey(e.root, e.typeId)])?.frets ?? null })),
+    [evs, prefs],
+  );
   const strums = useMemo(() => (song.onsets ?? []).map((o) => o.t), [song.onsets]);
+
+  // Alvos e modelos para a pontuação: o modelo de cada acorde vem das notas que o jogador REALMENTE aperta
+  const { targets, templates, names } = useMemo(() => {
+    const open = getTuning('re-sol-si-re').strings.map((s) => s.midi);
+    const tpl = new Map<string, Float64Array>();
+    const nm = new Map<string, string>();
+    const tg: Target[] = evs.map((e, i) => {
+      const key = shapeKey(e.root, e.typeId);
+      if (!tpl.has(key)) {
+        const frets = chords[i]?.frets;
+        const pcs = frets ? frets.map((f, s) => ((open[s] as number) + f) % 12) : (CHORD_TYPES.find((t) => t.id === e.typeId)?.intervals ?? [0, 4, 7]).map((iv) => (e.root + iv) % 12);
+        tpl.set(key, shapeTemplate(pcs));
+        nm.set(key, e.name);
+      }
+      return { start: e.start, end: e.end, key };
+    });
+    return { targets: tg, templates: tpl, names: nm };
+  }, [evs, chords]);
 
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -44,6 +84,29 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
   const [count, setCount] = useState(3);
   const [rate, setRate] = useState(1);
   const [cur, setCur] = useState(-1);
+
+  // ---- microfone e pontuação
+  const listener = useRef<ChordListener | null>(null);
+  const engine = useRef<ScoreEngine | null>(null);
+  const pending = useRef<Judgement[]>([]);
+  const gameT = useRef(0);
+  const [mic, setMic] = useState(false);
+  const micRef = useRef(false);
+  micRef.current = mic;
+  const [micError, setMicError] = useState('');
+  const [summary, setSummary] = useState<ScoreSummary | null>(null);
+  const [heard, setHeard] = useState<string | null>(null);
+  const [latency, setLatency] = useState(loadLatency);
+  const latencyRef = useRef(latency);
+  latencyRef.current = latency;
+  const reported = useRef(false);
+
+  const newEngine = () => {
+    engine.current = new ScoreEngine(targets, templates);
+    pending.current = [];
+    reported.current = false;
+    setSummary(engine.current.summary);
+  };
 
   // Tamanho do canvas (nítido, mas sem exagerar nos pixels: no máximo 1,5× por causa do desempenho)
   useEffect(() => {
@@ -72,6 +135,14 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
     let lastCur = -2;
     let flashes: Flash[] = [];
     let particles: Particle[] = [];
+    let popup: { text: string; color: string; at: number } | undefined;
+    let missAt: number | undefined;
+    const hitFx = (now: number) => {
+      for (let l = 0; l < 4; l++) {
+        flashes.push({ lane: l, at: now });
+        spawnSparks(geom.current, l, particles);
+      }
+    };
     const loop = (nowMs: number) => {
       const m = media.current;
       const cv = canvas.current;
@@ -79,27 +150,31 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
       if (m && ctx) {
         const playing = !m.paused && !m.ended;
         const t = clock.read(m.currentTime, nowMs, playing, m.playbackRate);
+        gameT.current = t;
         const dt = Math.min(0.05, (nowMs - lastNow) / 1000);
         lastNow = nowMs;
         const now = nowMs / 1000;
-        const g = geom.current;
 
-        // acordes que acabaram de cruzar a linha → clarão e faíscas nas 4 cordas
-        if (playing && lastT >= 0 && t > lastT && t - lastT < 0.3) {
-          for (const c of chords) {
-            if (c.start > lastT && c.start <= t) {
-              for (let l = 0; l < 4; l++) {
-                flashes.push({ lane: l, at: now });
-                spawnSparks(g, l, particles);
-              }
-            }
+        // pulo no tempo (seek/reinício): a pontuação recomeça dali
+        if (lastT >= 0 && Math.abs(t - lastT) > 0.6) engine.current?.seek(t);
+
+        if (micRef.current) {
+          // com microfone: os efeitos vêm dos julgamentos de verdade
+          for (const j of pending.current.splice(0)) {
+            const g = GRADE_TEXT[j.grade];
+            popup = { text: g.text, color: g.color, at: now };
+            if (j.grade === 'erro') missAt = now;
+            else hitFx(now);
           }
+        } else if (playing && lastT >= 0 && t > lastT && t - lastT < 0.3) {
+          // demonstração: clarão quando o acorde cruza a linha
+          for (const c of chords) if (c.start > lastT && c.start <= t) hitFx(now);
         }
         lastT = t;
         flashes = flashes.filter((f) => now - f.at < 0.4);
         particles = stepParticles(particles, dt);
 
-        drawHighway(ctx, g, { t, now, chords, strums, flashes, particles });
+        drawHighway(ctx, geom.current, { t, now, chords, strums, flashes, particles, popup, missAt });
 
         const i = activeIndex(evs, t);
         if (i !== lastCur) {
@@ -125,7 +200,14 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
     const onPause = () => {
       if (phaseRef.current === 'play' && !m.ended) setPhase('paused');
     };
-    const onEnded = () => setPhase('ended');
+    const onEnded = () => {
+      const e = engine.current;
+      if (e && micRef.current) {
+        e.finish();
+        setSummary(e.summary);
+      }
+      setPhase('ended');
+    };
     m.addEventListener('pause', onPause);
     m.addEventListener('ended', onEnded);
     return () => {
@@ -135,6 +217,17 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
       m.playbackRate = 1;
     };
   }, [media]);
+
+  // Desliga o microfone ao sair
+  useEffect(() => () => void listener.current?.stop(), []);
+
+  // Guarda o resultado de uma partida completa
+  useEffect(() => {
+    if (phase === 'ended' && mic && summary && !reported.current && summary.judged > 0) {
+      reported.current = true;
+      onResult?.({ score: summary.score, accuracy: summary.accuracy, stars: summary.stars });
+    }
+  }, [phase, mic, summary, onResult]);
 
   // Contagem 3-2-1 antes de tocar
   useEffect(() => {
@@ -155,9 +248,41 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
   const begin = (fromStart: boolean) => {
     const m = media.current;
     if (m && fromStart) m.currentTime = 0;
+    if (fromStart && micRef.current) newEngine();
     setCount(3);
     setPhase('count');
   };
+
+  /** Liga o microfone (precisa de um toque do usuário) e começa a pontuar. */
+  const startWithMic = async () => {
+    setMicError('');
+    try {
+      const l = listener.current ?? new ChordListener();
+      listener.current = l;
+      await l.start();
+      l.onFrame = (f) => {
+        const e = engine.current;
+        const m = media.current;
+        if (!e || !m || m.paused || phaseRef.current !== 'play') return;
+        // tempo da música em que o som foi tocado: agora − idade do som − atraso de áudio escolhido
+        const t = gameT.current - (f.ageSec + latencyRef.current / 1000) * m.playbackRate;
+        const js = e.push({ t, chroma: f.chroma, levelDb: f.levelDb });
+        if (js.length) {
+          pending.current.push(...js);
+          setSummary(e.summary);
+        }
+        setHeard((h) => (h === e.heard ? h : e.heard));
+      };
+      setMic(true);
+      micRef.current = true;
+      newEngine();
+      engine.current?.seek(media.current?.currentTime ?? 0);
+      begin(false);
+    } catch (err) {
+      setMicError(err instanceof Error ? err.message : 'Não consegui abrir o microfone.');
+    }
+  };
+
   const pause = () => {
     media.current?.pause();
     setPhase('paused');
@@ -170,11 +295,20 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
     setRate(r);
     if (media.current) media.current.playbackRate = r;
   };
+  const pickLatency = (v: number) => {
+    setLatency(v);
+    try {
+      localStorage.setItem(LATENCY_KEY, String(v));
+    } catch {
+      /* sem armazenamento */
+    }
+  };
 
   const nowEv = cur >= 0 ? evs[cur] : undefined;
   const nextIdx = cur >= 0 ? cur + 1 : evs.findIndex((c) => c.start > (media.current?.currentTime ?? 0));
   const nextEv = nextIdx >= 0 ? evs[nextIdx] : undefined;
   const done = Math.max(0, cur + 1);
+  const expectedKey = nowEv ? shapeKey(nowEv.root, nowEv.typeId) : null;
 
   return (
     <div className="game" role="dialog" aria-label="Cavaco Hero">
@@ -185,7 +319,17 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
         <button className="g-pause" onClick={pause} aria-label="Pausar" disabled={phase !== 'play'}>
           <span /><span />
         </button>
-        <div className="g-song">{song.name}</div>
+        {mic && summary ? (
+          <div className="g-score">
+            <b>{summary.score.toLocaleString('pt-BR')}</b>
+            <small>
+              {summary.combo > 1 ? `SEQUÊNCIA ${summary.combo}` : 'PONTOS'}
+              {summary.multiplier > 1 && <i> ×{summary.multiplier}</i>}
+            </small>
+          </div>
+        ) : (
+          <div className="g-song">{song.name}</div>
+        )}
         <div className="g-counter">
           <b>{done}</b>/{chords.length}
           <small>ACORDES</small>
@@ -208,6 +352,12 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
           </div>
         </div>
       </div>
+
+      {mic && (
+        <div className={`g-heard ${heard && heard === expectedKey ? 'ok' : heard ? 'no' : ''}`}>
+          🎤 {heard ? `ouvindo ${names.get(heard) ?? '?'}` : 'ouvindo…'}
+        </div>
+      )}
 
       <div className="g-stage" ref={stage} onClick={() => phase === 'play' && pause()}>
         <canvas ref={canvas} />
@@ -234,10 +384,14 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
           <div className="g-menu">
             <div className="g-logo">CAVACO<span>HERO</span></div>
             <div className="g-songname">{song.name}</div>
-            <p className="g-note">{chords.length} acordes · as 4 pistas são as 4 cordas, e o número em cada nota é a casa</p>
-            <button className="g-btn primary" onClick={() => begin(false)}>▶ TOCAR</button>
+            {song.best && <p className="g-note">Recorde: <b>{song.best.score.toLocaleString('pt-BR')}</b> · {'★'.repeat(song.best.stars)}{'☆'.repeat(5 - song.best.stars)} · {Math.round(song.best.accuracy * 100)}%</p>}
+            <button className="g-btn primary" onClick={() => void startWithMic()}>🎤 TOCAR VALENDO</button>
+            <button className="g-btn" onClick={() => begin(false)}>▶ SÓ ASSISTIR</button>
             <button className="g-btn" onClick={onClose}>VOLTAR</button>
-            <p className="g-note dim">Demonstração: ainda não ouve o seu cavaco, então não há pontuação. Use fones.</p>
+            {micError && <p className="g-note err">{micError}</p>}
+            <p className="g-note dim">
+              Valendo: o jogo ouve o seu cavaco e pontua. <b>Use fones</b> — sem fones o microfone ouve o vídeo e conta acerto que não é seu.
+            </p>
           </div>
         </div>
       )}
@@ -275,6 +429,13 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
                 <button key={r} className={`g-btn ${rate === r ? 'on' : ''}`} onClick={() => pickRate(r)}>{r}×</button>
               ))}
             </div>
+            {mic && (
+              <label className="g-latency">
+                <span>Sincronia do som: <b>{latency} ms</b></span>
+                <input type="range" min={0} max={500} step={10} value={latency} className="g-slider" onChange={(e) => pickLatency(Number(e.target.value))} aria-label="Atraso do som" />
+                <small>Acertos saindo como "ATRASADO" mesmo tocando na hora? Aumente. Fone Bluetooth costuma pedir 200–300 ms.</small>
+              </label>
+            )}
             <button className="g-btn" onClick={() => begin(true)}>↺ REINICIAR</button>
             <button className="g-btn" onClick={onClose}>SAIR</button>
           </div>
@@ -286,7 +447,21 @@ export function GameScreen({ song, media, problem, onAudioOnly, onClose }: Props
           <div className="g-menu">
             <div className="g-logo small">MÚSICA<span>COMPLETA!</span></div>
             <div className="g-songname">{song.name}</div>
-            <p className="g-note">{chords.length} acordes tocados na pista</p>
+            {mic && summary ? (
+              <>
+                <div className="g-stars" aria-label={`${summary.stars} de 5 estrelas`}>{'★'.repeat(summary.stars)}<i>{'★'.repeat(5 - summary.stars)}</i></div>
+                <div className="g-final">{summary.score.toLocaleString('pt-BR')}</div>
+                <p className="g-note">{Math.round(summary.accuracy * 100)}% de acerto · maior sequência {summary.maxCombo}</p>
+                <div className="g-grades">
+                  <span style={{ color: GRADE_TEXT.perfeito.color }}><b>{summary.counts.perfeito}</b>perfeito</span>
+                  <span style={{ color: GRADE_TEXT.bom.color }}><b>{summary.counts.bom}</b>bom</span>
+                  <span style={{ color: GRADE_TEXT.ok.color }}><b>{summary.counts.ok}</b>atrasado</span>
+                  <span style={{ color: GRADE_TEXT.erro.color }}><b>{summary.counts.erro}</b>errou</span>
+                </div>
+              </>
+            ) : (
+              <p className="g-note">{chords.length} acordes na pista</p>
+            )}
             <button className="g-btn primary" onClick={() => begin(true)}>↺ JOGAR DE NOVO</button>
             <button className="g-btn" onClick={onClose}>SAIR</button>
           </div>

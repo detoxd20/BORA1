@@ -29,6 +29,8 @@ export interface SongMeta {
   needsFile?: boolean;
   /** Forma (casas por corda) escolhida para cada acorde desta música. Chave "root:typeId". */
   shapes?: Record<string, number[]>;
+  /** Melhor resultado no jogo com microfone. */
+  best?: { score: number; accuracy: number; stars: number; at: number };
 }
 
 const DB = 'cavaco';
