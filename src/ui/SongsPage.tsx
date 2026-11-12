@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHORD_TYPES, chordName } from '../chords/models';
 import { cleanEvents, CLEAN_LEVELS, type CleanLevel } from '../chords/analyzer';
-import { deleteSong, getBlob, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
+import { deleteSong, exportBackup, getBlob, getMeta, importBackup, listSongs, newId, requestPersistence, saveSong, type SongMeta } from '../storage/library';
 import { NOTE_NAMES } from '../chords/notes';
 import { analyzeInWorker, decodeToMono } from '../songs/analyzeFile';
 import { DEFAULT_REGION, SCAN_STEP, findChordRegion, scanChords, type Region } from '../songs/ocr';
@@ -9,7 +9,7 @@ import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } fro
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
-import { mergeRepeats, moveStart, removeChord, retypeChord } from '../songs/edit';
+import { insertChord, mergeRepeats, moveEnd, moveStart, removeChord, retypeChord } from '../songs/edit';
 import { nearestOnset } from '../audio/onsets';
 
 const MIME: Record<string, string> = {
@@ -60,7 +60,11 @@ export function SongsPage() {
   const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLVideoElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const saveTimer = useRef<number>(0);
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const history = useRef<ChordEvent[][]>([]);
+  const [undoCount, setUndoCount] = useState(0);
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+  const [backupNote, setBackupNote] = useState('');
   const events = song?.events ?? [];
   const eventsRef = useRef(events);
   eventsRef.current = events;
@@ -68,42 +72,43 @@ export function SongsPage() {
   const refresh = useCallback(() => void listSongs().then(setLibrary).catch(() => setLibrary([])), []);
   useEffect(() => {
     refresh();
-    void requestPersistence();
+    void requestPersistence().then(setPersisted);
   }, [refresh]);
 
   const close = () => {
-    window.clearTimeout(saveTimer.current);
     if (url) URL.revokeObjectURL(url);
     setUrl('');
     setSong(null);
     setStatus('idle');
     setEditing(null);
     setCur(-1);
-    refresh();
+    history.current = [];
+    setUndoCount(0);
+    // espera os salvamentos pendentes antes de reler a biblioteca
+    void saveChain.current.then(refresh);
   };
 
-  /** Salva as edições logo após cada mudança. */
-  const commit = (next: SongMeta, flushNow = false) => {
+  /** Salva NA HORA (em fila, para manter a ordem). Cada edição pode ser desfeita. */
+  const commit = (next: SongMeta, opts: { noHistory?: boolean } = {}) => {
+    if (song && !opts.noHistory && next.events !== song.events) {
+      history.current.push(song.events);
+      if (history.current.length > 40) history.current.shift();
+      setUndoCount(history.current.length);
+    }
     setSong(next);
     setSaved(false);
-    window.clearTimeout(saveTimer.current);
-    const write = () => void saveSong({ ...next, updatedAt: Date.now() }).then(() => setSaved(true)).catch(() => setError('Não consegui salvar as alterações.'));
-    if (flushNow) write();
-    else saveTimer.current = window.setTimeout(write, 250);
+    const snapshot = { ...next, updatedAt: Date.now() };
+    saveChain.current = saveChain.current
+      .then(() => saveSong(snapshot))
+      .then(() => setSaved(true))
+      .catch(() => setError('Não consegui salvar as alterações. Faça um backup (Biblioteca → Exportar).'));
   };
 
-  // Garante o salvamento se o app for fechado/recarregado com edição pendente
-  useEffect(() => {
-    const flush = () => {
-      if (saveTimer.current && song) void saveSong({ ...song, updatedAt: Date.now() });
-    };
-    document.addEventListener('visibilitychange', flush);
-    window.addEventListener('pagehide', flush);
-    return () => {
-      document.removeEventListener('visibilitychange', flush);
-      window.removeEventListener('pagehide', flush);
-    };
-  }, [song]);
+  const undo = () => {
+    const prev = history.current.pop();
+    setUndoCount(history.current.length);
+    if (prev && song) commit({ ...song, events: prev, edited: true }, { noHistory: true });
+  };
 
   const runAnalysis = useCallback(async (file: Blob, base: SongMeta, level: CleanLevel) => {
     setError('');
@@ -139,7 +144,8 @@ export function SongsPage() {
     void runAnalysis(blob, base, 'medio');
   };
 
-  const open = async (meta: SongMeta) => {
+  const open = async (listed: SongMeta) => {
+    const meta = (await getMeta(listed.id)) ?? listed; // sempre a versão mais recente do banco, não a da lista
     const blob = await getBlob(meta.id);
     if (!blob) {
       setError('O arquivo desta música não está mais guardado. Apague-a e carregue de novo.');
@@ -265,7 +271,7 @@ export function SongsPage() {
   const setLevel = (level: CleanLevel) => {
     if (!song) return;
     if (song.edited && !window.confirm('Mudar a limpeza refaz a lista e descarta os ajustes que você fez à mão. Continuar?')) return;
-    commit({ ...song, cleanLevel: level, events: cleanEvents(song.raw, CLEAN_LEVELS[level]), edited: false }, true);
+    commit({ ...song, cleanLevel: level, events: cleanEvents(song.raw, CLEAN_LEVELS[level]), edited: false });
   };
 
   const reanalyze = async () => {
@@ -327,6 +333,52 @@ export function SongsPage() {
     setEditing(r.index); // se virou um bloco só com o vizinho, segue editando o bloco
   };
 
+  const attachFile = async (meta: SongMeta, f: File | undefined) => {
+    if (!f) return;
+    if (meta.size && f.size !== meta.size && !window.confirm('Este arquivo tem tamanho diferente do original; os tempos dos acordes podem não bater. Usar mesmo assim?')) return;
+    await saveSong({ ...meta, needsFile: false, size: f.size, type: f.type || meta.type }, typed(f, f.name, f.type));
+    refresh();
+  };
+
+  const doExport = async () => {
+    const blob = new Blob([await exportBackup()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cavaco-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    setBackupNote('Backup salvo na pasta Downloads. Guarde esse arquivo: ele traz todos os seus acordes.');
+  };
+
+  const doImport = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      const r = await importBackup(await f.text());
+      setBackupNote(`Backup importado: ${r.added} música(s) nova(s), ${r.updated} atualizada(s). As novas pedem para escolher o vídeo de novo.`);
+      refresh();
+    } catch (e) {
+      setBackupNote(e instanceof Error ? e.message : 'Não consegui ler o backup.');
+    }
+  };
+
+  const backupBar = (
+    <div className="backup">
+      <p className="muted small">
+        {persisted === null ? '' : persisted
+          ? '💾 Armazenamento protegido neste aparelho.'
+          : '⚠ O navegador pode apagar os dados do app. Instale na tela inicial (menu ⋮ → Adicionar à tela inicial), abra sempre pelo ícone e faça backup.'}
+      </p>
+      <div className="toolbar">
+        <button className="chip" onClick={() => void doExport()} disabled={library.length === 0}>Exportar backup</button>
+        <label className="chip">
+          Importar backup
+          <input type="file" accept="application/json,.json" hidden onChange={(e) => { void doImport(e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+      </div>
+      {backupNote && <p className="muted small">{backupNote}</p>}
+    </div>
+  );
+
   return (
     <>
       <header className="top">
@@ -356,16 +408,25 @@ export function SongsPage() {
             </label>
             <p className="muted small">Use fones ao tocar junto: o som do vídeo atrapalha o microfone.</p>
             {error && <p className="error">{error}</p>}
+            {backupBar}
           </div>
         ) : (
           <div className="library">
             {error && <p className="error">{error}</p>}
             {library.map((m) => (
               <div key={m.id} className="lib-row">
-                <button className="lib-open" onClick={() => void open(m)}>
-                  <span className="lib-name">{m.name}</span>
-                  <span className="muted small">{m.events.length} acordes · {(m.size / 1048576).toFixed(1)} MB</span>
-                </button>
+                {m.needsFile ? (
+                  <label className="lib-open">
+                    <span className="lib-name">{m.name}</span>
+                    <span className="muted small">{m.events.length} acordes · <b>falta o vídeo: toque para escolher o arquivo</b></span>
+                    <input type="file" accept="video/*,audio/*" hidden onChange={(e) => { void attachFile(m, e.target.files?.[0]); e.target.value = ''; }} />
+                  </label>
+                ) : (
+                  <button className="lib-open" onClick={() => void open(m)}>
+                    <span className="lib-name">{m.name}</span>
+                    <span className="muted small">{m.events.length} acordes · {(m.size / 1048576).toFixed(1)} MB · salvo {new Date(m.updatedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                  </button>
+                )}
                 <button
                   className="row-edit"
                   aria-label={`Apagar ${m.name}`}
@@ -377,6 +438,7 @@ export function SongsPage() {
                 </button>
               </div>
             ))}
+            {backupBar}
           </div>
         )
       ) : (
@@ -452,6 +514,9 @@ export function SongsPage() {
                 >
                   {follow ? 'Seguindo ✓' : 'Seguir'}
                 </button>
+                <button className="chip" onClick={undo} disabled={undoCount === 0}>
+                  ↶ Desfazer{undoCount > 0 ? ` (${undoCount})` : ''}
+                </button>
                 <button className="chip" onClick={() => void reanalyze()}>Analisar de novo</button>
                 <button
                   className="chip"
@@ -481,9 +546,9 @@ export function SongsPage() {
                   className="chip"
                   onClick={() => {
                     const t = video.current?.currentTime ?? 0;
-                    const n = normalize([...events, { start: t, end: t + 2, name: 'C', root: 0, typeId: 'maj', confidence: 1 }]);
-                    update(n);
-                    startEditing(n.findIndex((e) => e.start === t));
+                    const r = insertChord(events, t);
+                    if (song) commit({ ...song, events: r.events, edited: true });
+                    startEditing(r.index);
                   }}
                 >
                   + Acorde aqui
@@ -567,6 +632,13 @@ export function SongsPage() {
             >
               🎯 Grudar na palhetada mais próxima
             </button>
+            <h3>Tempo de fim</h3>
+            <div className="nudge">
+              <button className="pick" onClick={() => update(moveEnd(events, editing, ed.end - 0.1))}>−0,1 s</button>
+              <button className="pick" onClick={() => seek(Math.max(0, ed.end - 0.05))}>Ir ao fim</button>
+              <button className="pick" onClick={() => update(moveEnd(events, editing, ed.end + 0.1))}>+0,1 s</button>
+              <button className="pick" onClick={() => update(moveEnd(events, editing, video.current?.currentTime ?? ed.end))}>Aqui</button>
+            </div>
             <button
               className="btn danger"
               onClick={() => {

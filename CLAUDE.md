@@ -27,6 +27,10 @@ Limites conhecidos: OCR erra letras soltas (ex.: "G" lido como "G7" ou perdido);
 Detecção de palhetada (feito): `src/audio/onsets.ts` (fluxo espectral log, só aumento de energia) + `refineWithOnsets` (janela ±1 s, ignora ataques fracos): o Viterbi
 decide QUAL acorde, a palhetada decide QUANDO troca. Onsets ficam em `SongMeta.onsets` (base para pontuar o jogo). Teste sintético: erro máx. 84→29 ms; trocas de acordes quase
 iguais (G7→G) com voz forte ainda podem errar ~1 s. Editor: "Grudar na palhetada mais próxima". Apagar = um botão (anterior continua; repetidos juntam).
+Persistência: cada edição salva na hora (fila, sem debounce), "Desfazer" (40 níveis), inserir acorde divide o acorde atual (`insertChord`), ajuste de início E fim,
+backup/restauração em JSON (`exportBackup`/`importBackup`; músicas importadas ficam `needsFile` até o usuário escolher o vídeo). O app mostra se o armazenamento está protegido
+(`navigator.storage.persist`). Hipótese para "perdi as edições ao recarregar": armazenamento separado por onde o link é aberto (aba do app de chat × Chrome × PWA instalado) —
+orientar a instalar na tela inicial e abrir sempre por ele.
 Pendente: destacar trechos onde áudio e vídeo discordam.
 
 ## Módulos (histórico)

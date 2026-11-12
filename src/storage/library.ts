@@ -25,6 +25,8 @@ export interface SongMeta {
   oneAtATime?: boolean;
   /** Palhetadas detectadas no áudio (para encostar trocas de acorde e, depois, pontuar o jogo). */
   onsets?: Onset[];
+  /** Veio de um backup: os acordes existem, mas falta escolher de novo o arquivo de vídeo. */
+  needsFile?: boolean;
 }
 
 const DB = 'cavaco';
@@ -59,11 +61,13 @@ function run<T>(stores: string[], mode: IDBTransactionMode, fn: (tx: IDBTransact
   );
 }
 
-export async function requestPersistence(): Promise<void> {
+/** Pede ao navegador para não apagar os dados do app. Devolve se ficaram protegidos. */
+export async function requestPersistence(): Promise<boolean> {
   try {
-    await navigator.storage?.persist?.();
+    if (await navigator.storage?.persisted?.()) return true;
+    return (await navigator.storage?.persist?.()) ?? false;
   } catch {
-    /* ok */
+    return false;
   }
 }
 
@@ -91,4 +95,34 @@ export function deleteSong(id: string): Promise<void> {
     tx.objectStore(META).delete(id);
     tx.objectStore(BLOBS).delete(id);
   });
+}
+
+export async function getMeta(id: string): Promise<SongMeta | undefined> {
+  return run<SongMeta | undefined>([META], 'readonly', (tx) => tx.objectStore(META).get(id));
+}
+
+/** Backup em texto: os acordes e ajustes de todas as músicas (o vídeo não entra: é grande). */
+export async function exportBackup(): Promise<string> {
+  const songs = await listSongs();
+  return JSON.stringify({ app: 'cavaco', version: 1, exportedAt: new Date().toISOString(), songs }, null, 1);
+}
+
+/** Importa um backup. Música que já existe fica com a versão mais recente; nova entra pedindo o arquivo. */
+export async function importBackup(text: string): Promise<{ added: number; updated: number }> {
+  const data = JSON.parse(text) as { app?: string; songs?: SongMeta[] };
+  if (data.app !== 'cavaco' || !Array.isArray(data.songs)) throw new Error('Este arquivo não é um backup do Cavaco.');
+  const have = new Map((await listSongs()).map((m) => [m.id, m]));
+  let added = 0, updated = 0;
+  for (const m of data.songs) {
+    if (!m || typeof m.id !== 'string' || !Array.isArray(m.events)) continue;
+    const cur = have.get(m.id);
+    if (!cur) {
+      await saveSong({ ...m, needsFile: true });
+      added++;
+    } else if ((m.updatedAt ?? 0) > (cur.updatedAt ?? 0)) {
+      await saveSong({ ...cur, ...m, needsFile: cur.needsFile });
+      updated++;
+    }
+  }
+  return { added, updated };
 }

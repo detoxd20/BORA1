@@ -204,3 +204,4 @@ input[type=range] { width: 100%; height: 40px; accent-color: var(--accent); }
 .vocab-names { font-size: 17px; font-weight: 700; line-height: 1.4; word-break: break-word; }
 .live-chip.removable { color: var(--text); }
 .live-chip.removable span { color: var(--muted); font-size: 13px; margin-left: 4px; }
+.backup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); width: 100%; } .chip:disabled { opacity: .45; }
