@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { diagramWindow, resolveShape } from '../chords/shapes';
+import { DIAGRAM_FRETS, diagramWindow, resolveShape } from '../chords/shapes';
 
 interface Props {
   root: number;
@@ -15,8 +15,8 @@ interface Props {
 
 const XS = [18, 39, 61, 82]; // 4ª corda (grave) … 1ª corda (aguda), da esquerda para a direita
 const TOP = 26;
-const FRET_H = 22;
-const FRETS = 4;
+const FRET_H = 18;
+const FRETS = DIAGRAM_FRETS;
 
 /** Formação do acorde no braço do cavaquinho (D G B D), calculada e validada no código. */
 export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 120, showNotes = true, color = '#f5a524', frets }: Props) {
@@ -24,7 +24,7 @@ export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 
   if (!shape) return null;
   const { base, nut } = diagramWindow(shape);
   const bottom = TOP + FRET_H * FRETS;
-  const vh = showNotes ? 134 : 122;
+  const vh = showNotes ? 136 : 124;
   return (
     <svg viewBox={`${nut ? 0 : -16} 0 ${nut ? 100 : 116} ${vh}`} height={height} width={(height * (nut ? 100 : 116)) / vh} role="img" aria-label={`Formação: casas ${shape.frets.join(', ')}`}>
       {/* casas */}
@@ -45,8 +45,8 @@ export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 
           <circle key={i} cx={XS[i]} cy={TOP - 10} r={5} fill="none" stroke="#e6ebf1" strokeWidth={1.8} />
         ) : (
           <g key={i}>
-            <circle cx={XS[i]} cy={TOP + (f - base + 0.5) * FRET_H} r={8.6} fill={color} />
-            <text x={XS[i]} y={TOP + (f - base + 0.5) * FRET_H + 4} textAnchor="middle" fontSize={11} fontWeight={800} fill="#1a1100">
+            <circle cx={XS[i]} cy={TOP + (f - base + 0.5) * FRET_H} r={7.6} fill={color} />
+            <text x={XS[i]} y={TOP + (f - base + 0.5) * FRET_H + 3.6} textAnchor="middle" fontSize={10} fontWeight={800} fill="#1a1100">
               {shape.fingers[i]}
             </text>
           </g>
