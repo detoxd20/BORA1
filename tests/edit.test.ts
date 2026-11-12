@@ -45,3 +45,32 @@ describe('removeChord', () => {
     expect(JSON.stringify(song)).toBe(copy);
   });
 });
+
+import { mergeRepeats, retypeChord } from '../src/songs/edit';
+
+describe('mergeRepeats', () => {
+  it('repetidos vizinhos viram um só, mesmo com pequena lacuna', () => {
+    const r = mergeRepeats([e(0, 2, 'C', 0), e(2.4, 4, 'C', 0), e(4, 6, 'G7', 7, '7'), e(6, 8, 'G7', 7, '7'), e(8, 9, 'C', 0)]);
+    expect(r.map((x) => [x.name, x.start, x.end])).toEqual([['C', 0, 4], ['G7', 4, 8], ['C', 8, 9]]);
+  });
+  it('lacuna grande (silêncio) não junta', () => {
+    expect(mergeRepeats([e(0, 2, 'C', 0), e(10, 12, 'C', 0)])).toHaveLength(2);
+  });
+  it('acordes diferentes alternados não mudam', () => {
+    expect(mergeRepeats(song)).toHaveLength(4);
+  });
+});
+
+describe('retypeChord', () => {
+  it('trocar F# por C (igual aos vizinhos) junta os três num bloco só', () => {
+    const s = [e(0, 2, 'C', 0), e(2, 4, 'F#', 6), e(4, 6, 'C', 0), e(6, 8, 'G7', 7, '7')];
+    const r = retypeChord(s, 1, { root: 0, typeId: 'maj', name: 'C' });
+    expect(r.events.map((x) => [x.name, x.start, x.end])).toEqual([['C', 0, 6], ['G7', 6, 8]]);
+    expect(r.index).toBe(0);
+  });
+  it('trocar por um acorde diferente dos vizinhos só renomeia', () => {
+    const r = retypeChord(song, 1, { root: 5, typeId: 'maj', name: 'F' });
+    expect(r.events.map((x) => x.name)).toEqual(['C', 'F', 'G7', 'C']);
+    expect(r.index).toBe(1);
+  });
+});
