@@ -9,6 +9,7 @@ import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } fro
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
+import { removeChord } from '../songs/edit';
 
 const MIME: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', '3gp': 'video/3gpp',
@@ -551,14 +552,27 @@ export function SongsPage() {
               <button className="pick" onClick={() => update(events.map((e, k) => (k === editing ? { ...e, start: e.start + 0.1 } : e)))}>+0,1 s</button>
               <button className="pick" onClick={() => update(events.map((e, k) => (k === editing ? { ...e, start: video.current?.currentTime ?? e.start } : e)))}>Aqui</button>
             </div>
+            <h3>Apagar este acorde</h3>
+            <p className="muted small">O tempo dele não fica vazio: um vizinho ocupa o lugar.</p>
             <button
               className="btn danger"
               onClick={() => {
-                update(events.filter((_, k) => k !== editing));
+                if (editing === null) return;
+                commit({ ...song!, events: removeChord(events, editing, 'prev'), edited: true });
                 setEditing(null);
               }}
             >
-              Apagar este acorde
+              Apagar — o anterior continua{events[editing - 1] ? ` (${events[editing - 1]!.name})` : ''}
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                if (editing === null) return;
+                commit({ ...song!, events: removeChord(events, editing, 'next'), edited: true });
+                setEditing(null);
+              }}
+            >
+              Apagar — o próximo começa antes{events[editing + 1] ? ` (${events[editing + 1]!.name})` : ''}
             </button>
           </div>
         </div>
