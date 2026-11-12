@@ -58,7 +58,12 @@ export function SongsPage() {
   const [vocabEdit, setVocabEdit] = useState(false);
   const [stage, setStage] = useState<'find' | 'read'>('read');
   const [ocrNote, setOcrNote] = useState('');
-  const video = useRef<HTMLVideoElement>(null);
+  const video = useRef<HTMLMediaElement>(null);
+  const blobRef = useRef<Blob | null>(null);
+  const loadedRef = useRef(false);
+  const copyTried = useRef(false);
+  const stuckTimer = useRef<number>(0);
+  const [audioOnly, setAudioOnly] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   const history = useRef<ChordEvent[][]>([]);
@@ -137,7 +142,10 @@ export function SongsPage() {
     };
     base.type = f.type || MIME[f.name.split('.').pop()?.toLowerCase() ?? ''] || '';
     const blob = typed(f, f.name, f.type);
+    blobRef.current = blob;
     setMediaErr('');
+    copyTried.current = false;
+    setAudioOnly(false);
     setUrl(URL.createObjectURL(blob));
     setSong(base);
     setCur(-1);
@@ -153,22 +161,60 @@ export function SongsPage() {
     }
     setError('');
     setMediaErr('');
-    setUrl(URL.createObjectURL(typed(blob, meta.name, meta.type)));
+    copyTried.current = false;
+    setAudioOnly(false);
+    blobRef.current = typed(blob, meta.name, meta.type);
+    setUrl(URL.createObjectURL(blobRef.current));
     setSong(meta);
     setSaved(true);
     setStatus('ready');
   };
 
+  /** Texto de diagnóstico do player (para mostrar e para copiar e me mandar). */
+  const mediaDiag = (): string => {
+    const v = video.current as HTMLVideoElement | null;
+    const type = song?.type || (song ? MIME[song.name.split('.').pop()?.toLowerCase() ?? ''] : '') || '?';
+    return [
+      `arquivo: ${song?.name ?? '?'} · tipo ${type} · ${song ? (song.size / 1048576).toFixed(1) : '?'} MB`,
+      `o celular diz que ${v?.canPlayType?.(type) ? `consegue tocar este tipo (${v.canPlayType(type)})` : 'NÃO consegue tocar este tipo'}`,
+      `readyState ${v?.readyState} · networkState ${v?.networkState} · código de erro ${v?.error?.code ?? '-'}`,
+      `imagem ${v?.videoWidth ?? 0}x${v?.videoHeight ?? 0} · duração ${v?.duration ?? '?'}`,
+      `navegador: ${navigator.userAgent.slice(0, 110)}`,
+    ].join('\n');
+  };
+
+  const showFail = (why: string) => setMediaErr(`${why}\n\n${mediaDiag()}`);
+
   /** Plano B: copia o arquivo para a memória e recria o endereço do vídeo. */
   const reloadVideo = async () => {
     if (!song) return;
-    const stored = await getBlob(song.id);
+    // Na 1ª carga o arquivo ainda não está no banco (só depois da análise): usa o que está em memória.
+    const stored = blobRef.current ?? (await getBlob(song.id));
     if (!stored) return;
     const copy = typed(new Blob([await stored.arrayBuffer()], { type: stored.type }), song.name, song.type);
     if (url) URL.revokeObjectURL(url);
     setMediaErr('');
     setUrl(URL.createObjectURL(copy));
   };
+
+  /** Falhou? Tenta sozinho o plano B (uma vez por música); se falhar de novo, mostra o diagnóstico. */
+  const onMediaProblem = (why: string) => {
+    if (!copyTried.current) {
+      copyTried.current = true;
+      void reloadVideo();
+    } else showFail(why);
+  };
+
+  // Vigia: se em 6 s o vídeo não carregou nada, é problema
+  useEffect(() => {
+    if (!url) return;
+    loadedRef.current = false;
+    const t = window.setTimeout(() => {
+      if (!loadedRef.current) onMediaProblem('O vídeo não carregou.');
+    }, 6000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
   /** Refaz a análise de áudio restrita à lista de acordes do vídeo. */
   const analyzeWithVocab = async (base: SongMeta, vocab: VocabSegment[], region: Region | undefined, oneAtATime: boolean, note: string) => {
@@ -443,23 +489,46 @@ export function SongsPage() {
         )
       ) : (
         <div className="song">
-          <video
-            ref={video}
-            src={url}
-            controls
-            playsInline
-            preload="auto"
-            className="video"
-            onError={(e) => {
-              const code = e.currentTarget.error?.code ?? 0;
-              setMediaErr(`Erro ${code}: ${MEDIA_ERRORS[code] ?? 'falha desconhecida'}.`);
-            }}
-          />
+          {audioOnly ? (
+            <audio ref={video as never} src={url} controls preload="auto" className="video audio-only" onLoadedData={() => (loadedRef.current = true)} onError={() => showFail('Nem o áudio tocou.')} />
+          ) : (
+            <video
+              ref={video as never}
+              src={url}
+              controls
+              playsInline
+              preload="auto"
+              className="video"
+              onLoadedData={() => {
+                loadedRef.current = true;
+                setMediaErr('');
+              }}
+              onError={(e) => {
+                const code = e.currentTarget.error?.code ?? 0;
+                onMediaProblem(`Erro ${code}: ${MEDIA_ERRORS[code] ?? 'falha desconhecida'}.`);
+              }}
+              onPlay={() => {
+                window.clearTimeout(stuckTimer.current);
+                // deu play e o tempo não andou em 5 s → travado
+                stuckTimer.current = window.setTimeout(() => onMediaProblem('O vídeo não anda ao tocar.'), 5000);
+              }}
+              onTimeUpdate={() => {
+                window.clearTimeout(stuckTimer.current);
+                if (mediaErr) setMediaErr('');
+              }}
+              onPause={() => window.clearTimeout(stuckTimer.current)}
+            />
+          )}
           {mediaErr && (
             <div className="progress-card">
-              <p className="error">O vídeo não tocou. {mediaErr}</p>
-              <p className="muted small">Os acordes continuam valendo. Se o formato não é suportado, converta o vídeo para MP4 (H.264) e carregue de novo.</p>
-              <button className="chip" onClick={() => void reloadVideo()}>Tentar de novo</button>
+              <p className="error">O vídeo não tocou.</p>
+              <pre className="diag">{mediaErr}</pre>
+              <p className="muted small">Os acordes continuam valendo. Você pode ouvir só o áudio e seguir o jogo pelos acordes.</p>
+              <div className="toolbar">
+                <button className="chip" onClick={() => void reloadVideo()}>Tentar de novo</button>
+                {!audioOnly && <button className="chip accent" onClick={() => { setMediaErr(''); setAudioOnly(true); }}>Tocar só o áudio</button>}
+                <button className="chip" onClick={() => void navigator.clipboard?.writeText(mediaErr)}>Copiar diagnóstico</button>
+              </div>
             </div>
           )}
 
@@ -536,10 +605,10 @@ export function SongsPage() {
                 >
                   ✂ Apagar depois daqui
                 </button>
-                <button className="chip accent" onClick={() => void autoRead()}>
+                <button className="chip accent" disabled={audioOnly} onClick={() => void autoRead()}>
                   Ler acordes do vídeo
                 </button>
-                <button className="chip" onClick={() => { video.current?.pause(); setPicking(true); }}>
+                <button className="chip" disabled={audioOnly} onClick={() => { video.current?.pause(); setPicking(true); }}>
                   Ajustar região
                 </button>
                 <button
@@ -582,7 +651,7 @@ export function SongsPage() {
       )}
 
       {picking && video.current && (
-        <RegionPicker video={video.current} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />
+        <RegionPicker video={video.current as HTMLVideoElement} initial={song?.region ?? DEFAULT_REGION} onConfirm={(r) => void readFromVideo(r)} onCancel={() => setPicking(false)} />
       )}
 
       {vocabEdit && song?.vocab && (
