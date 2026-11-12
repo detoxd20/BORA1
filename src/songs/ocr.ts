@@ -1,6 +1,7 @@
 /** Lê, por OCR, os acordes escritos numa região do vídeo ao longo do tempo (tudo local, sem internet). */
 import { createWorker } from 'tesseract.js';
-import { parseChordLine, type ParsedChord } from '../chords/parse';
+import { parseChord, parseChordLine, type ParsedChord } from '../chords/parse';
+import { pickRegion, type ChordWord } from './region';
 import type { Observation } from './vocabulary';
 
 /** Retângulo em frações (0–1) do quadro do vídeo. */
@@ -95,6 +96,27 @@ export class ChordOcr {
     return [...seen.values()];
   }
 
+  /** Lê o quadro INTEIRO e devolve só as palavras que parecem acordes, com posição (frações do quadro). */
+  async findWords(canvas: HTMLCanvasElement): Promise<ChordWord[]> {
+    const res = await this.worker.recognize(canvas, {}, { blocks: true });
+    const out: ChordWord[] = [];
+    for (const b of res.data.blocks ?? [])
+      for (const p of b.paragraphs)
+        for (const l of p.lines)
+          for (const w of l.words) {
+            const c = parseChord(w.text);
+            // letra solta ("A", "E") é a maior fonte de falso acorde: exige mais confiança
+            if (!c || w.confidence < (c.name.length === 1 ? 75 : 55)) continue;
+            out.push({
+              name: c.name,
+              x0: w.bbox.x0 / canvas.width, y0: w.bbox.y0 / canvas.height,
+              x1: w.bbox.x1 / canvas.width, y1: w.bbox.y1 / canvas.height,
+              conf: w.confidence,
+            });
+          }
+    return out;
+  }
+
   terminate(): Promise<unknown> {
     return this.worker.terminate();
   }
@@ -139,6 +161,38 @@ export async function scanChords(
       opts.onProgress?.(Math.min(1, t / duration));
     }
     return out;
+  } finally {
+    await ocr.terminate();
+    video.removeAttribute('src');
+    video.load();
+  }
+}
+
+/**
+ * Descobre sozinho onde ficam os acordes: lê o quadro inteiro em ~20 instantes espalhados pelo vídeo
+ * e vê onde palavras-acorde aparecem sempre no mesmo lugar.
+ */
+export async function findChordRegion(
+  src: string,
+  opts: { samples?: number; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+): Promise<Region | null> {
+  const n = opts.samples ?? 20;
+  const video = await loadVideo(src);
+  if (!video.videoWidth) throw new Error('Este arquivo não tem imagem (é só áudio).');
+  const ocr = await ChordOcr.create();
+  try {
+    const canvas = document.createElement('canvas');
+    const frames: ChordWord[][] = [];
+    const duration = video.duration;
+    for (let i = 0; i < n; i++) {
+      if (opts.signal?.aborted) throw new Error('Cancelado.');
+      await seekTo(video, Math.min(duration - 0.05, duration * (0.03 + (0.94 * i) / Math.max(1, n - 1))));
+      // largura ~1280 px: texto pequeno ainda legível, sem pesar demais no celular
+      cropTo(canvas, video, { x: 0, y: 0, w: 1, h: 1 }, Math.min(video.videoHeight, (1280 * video.videoHeight) / video.videoWidth));
+      frames.push(await ocr.findWords(canvas));
+      opts.onProgress?.((i + 1) / n);
+    }
+    return pickRegion(frames);
   } finally {
     await ocr.terminate();
     video.removeAttribute('src');
