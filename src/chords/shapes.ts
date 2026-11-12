@@ -127,3 +127,21 @@ export function diagramWindow(shape: Shape): { base: number; nut: boolean } {
 export function chordNotes(root: number, typeId: string): string[] {
   return buildModel(root, CHORD_TYPES.find((t) => t.id === typeId)!).pitchClasses.map((p) => NOTE_NAMES[p] as string);
 }
+
+export const shapeKey = (root: number, typeId: string) => `${root}:${typeId}`;
+
+/**
+ * Formação a usar: a preferida (se for válida para o acorde), senão a melhor pela regra.
+ * Uma preferência inválida (ex.: de outra afinação) é ignorada — nunca mostramos um diagrama errado.
+ */
+export function resolveShape(root: number, typeId: string, preferred?: number[], tuningId?: string): Shape | null {
+  if (preferred && validateShape(preferred, root, typeId, tuningId)) {
+    const all = shapesFor(root, typeId, tuningId);
+    const found = all.find((s) => s.frets.join() === preferred.join());
+    if (found) return found;
+    const open = getTuning(tuningId ?? 're-sol-si-re').strings.map((s) => s.midi);
+    const fingers = assignFingers(preferred);
+    if (fingers) return { frets: preferred, fingers, notes: preferred.map((f, i) => NOTE_NAMES[((open[i] as number) + f) % 12] as string), cost: 0 };
+  }
+  return bestShape(root, typeId, tuningId);
+}

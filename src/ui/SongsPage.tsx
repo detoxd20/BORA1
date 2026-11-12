@@ -9,6 +9,8 @@ import { buildVocabulary, chordsPerFrame, fillFromVideo, type VocabSegment } fro
 import { RegionPicker } from './RegionPicker';
 import { VocabEditor } from './VocabEditor';
 import { GameScreen } from './GameScreen';
+import { ShapePicker } from './ShapePicker';
+import { loadShapePrefs, saveShapePref } from '../storage/shapePrefs';
 import { activeIndex, fmtTime, type ChordEvent } from '../songs/types';
 import { insertChord, mergeRepeats, moveEnd, moveStart, removeChord, retypeChord } from '../songs/edit';
 import { nearestOnset } from '../audio/onsets';
@@ -58,6 +60,7 @@ export function SongsPage() {
   const [picking, setPicking] = useState(false);
   const [vocabEdit, setVocabEdit] = useState(false);
   const [gaming, setGaming] = useState(false);
+  const [shaping, setShaping] = useState(false);
   const [stage, setStage] = useState<'find' | 'read'>('read');
   const [ocrNote, setOcrNote] = useState('');
   const video = useRef<HTMLMediaElement>(null);
@@ -552,9 +555,14 @@ export function SongsPage() {
 
           {status === 'ready' && (
             <>
-              <button className="btn primary play" onClick={() => { video.current?.pause(); setGaming(true); }} disabled={events.length === 0}>
-                🎮 Jogar
-              </button>
+              <div className="two-btn">
+                <button className="btn primary play" onClick={() => { video.current?.pause(); setGaming(true); }} disabled={events.length === 0}>
+                  🎮 Jogar
+                </button>
+                <button className="btn play" style={{ fontSize: 16 }} onClick={() => { video.current?.pause(); setShaping(true); }} disabled={events.length === 0}>
+                  🎸 Formas
+                </button>
+              </div>
 
               <div className="now-next">
                 <div className="now">
@@ -657,6 +665,18 @@ export function SongsPage() {
             </>
           )}
         </div>
+      )}
+
+      {shaping && song && (
+        <ShapePicker
+          events={events}
+          chosen={{ ...loadShapePrefs(), ...(song.shapes ?? {}) }}
+          onPick={(key, frets) => {
+            saveShapePref(key, frets); // padrão para as outras músicas
+            commit({ ...song, shapes: { ...(song.shapes ?? {}), [key]: frets } }, { noHistory: true });
+          }}
+          onClose={() => setShaping(false)}
+        />
       )}
 
       {gaming && song && <GameScreen song={song} url={url} audioOnly={audioOnly} onClose={() => setGaming(false)} />}

@@ -55,3 +55,23 @@ describe('formações de acordes no cavaquinho (D G B D)', () => {
     expect(diagramWindow({ frets: [5, 5, 6, 7], fingers: [], notes: [], cost: 0 })).toEqual({ base: 5, nut: false });
   });
 });
+
+import { resolveShape } from '../src/chords/shapes';
+describe('resolveShape (forma preferida)', () => {
+  it('usa a forma escolhida quando é válida para o acorde', () => {
+    const alt = shapesFor(0, 'maj')[2]!;
+    expect(resolveShape(0, 'maj', alt.frets)!.frets).toEqual(alt.frets);
+  });
+  it('preferência inválida é ignorada: nunca mostra diagrama errado', () => {
+    expect(resolveShape(0, 'maj', [0, 0, 0, 0])!.frets).toEqual(bestShape(0, 'maj')!.frets); // soltas = G, não C
+    expect(resolveShape(0, 'maj', [1, 2])!.frets).toEqual(bestShape(0, 'maj')!.frets);
+  });
+  it('sem preferência → melhor forma', () => {
+    expect(resolveShape(9, 'min')!.frets).toEqual(bestShape(9, 'min')!.frets);
+  });
+  it('forma válida fora da lista gerada (ex.: casa alta) também é aceita e ganha dedos/notas', () => {
+    const s = resolveShape(7, 'maj', [12, 12, 12, 12])!; // G uma oitava acima
+    expect(s.frets).toEqual([12, 12, 12, 12]);
+    expect(s.notes).toEqual(['D', 'G', 'B', 'D']);
+  });
+});

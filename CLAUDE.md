@@ -38,6 +38,9 @@ altura = duração; uma matiz por nota fundamental; palhetadas detectadas aparec
 (sem re-render por quadro). `src/chords/shapes.ts` GERA as formações no braço (D G B D) por regra e `validateShape` confere cada nota (teste cobre os 144 acordes); custo prefere casas baixas, poucos dedos,
 cordas soltas, quinta presente, fundamental no grave. NÃO é um dicionário curado: algumas formações podem não ser as "usuais" do cavaquinista → falta permitir escolher/salvar a posição preferida por acorde.
 Editor foi enxugado: botão Jogar em destaque, ferramentas raras dentro de "Ferramentas de edição".
+Formas preferidas (feito): `ShapePicker` (botão "🎸 Formas") lista os acordes da música com até 8 formas; a escolha vai para `SongMeta.shapes` e vira padrão global (`storage/shapePrefs.ts`);
+`resolveShape` ignora preferência inválida (nunca mostra diagrama errado). Engasgo nas trocas: cartas da pista NÃO mudam de estilo ao trocar de acorde (evita re-rasterizar a pista), sem backdrop-filter,
+janela de cartas recalculada 1×/s; medição no desktop com CPU 4× mais lenta: pior quadro 33→16,8 ms. Efeito no Android real não confirmado.
 Próximo: detector ao vivo (mic) + pontuação por tempo/acerto sobre a pista; calibração de latência.
 Pendente: destacar trechos onde áudio e vídeo discordam.
 
