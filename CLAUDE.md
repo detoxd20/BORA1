@@ -33,6 +33,12 @@ backup/restauração em JSON (`exportBackup`/`importBackup`; músicas importadas
 orientar a instalar na tela inicial e abrir sempre por ele.
 Player (Android Chrome é o ponto frágil; não reproduzível no desktop): vigia de 6 s + `onError` + detector de "deu play e não andou" → plano B automático (copia o Blob p/ memória; na 1ª carga
 usa `blobRef`, pois o arquivo só vai ao IndexedDB depois da análise) → cartão com diagnóstico copiável + "Tocar só o áudio" (<audio>, acordes seguem sincronizados). OCR fica desabilitado nesse modo.
+JOGO (v0, só visual, sem detectar o som do cavaco): `GameScreen` em tela cheia — vídeo ao fundo, HUD AGORA/PRÓXIMO com diagrama, pista estilo Guitar Hero (cartas descem até a "linha de acerto";
+altura = duração; uma matiz por nota fundamental; palhetadas detectadas aparecem como traços), controles: play/pause, ±5 s, velocidade 0,5/0,75/1×, barra de posição. Pista = UMA transformação CSS no rAF
+(sem re-render por quadro). `src/chords/shapes.ts` GERA as formações no braço (D G B D) por regra e `validateShape` confere cada nota (teste cobre os 144 acordes); custo prefere casas baixas, poucos dedos,
+cordas soltas, quinta presente, fundamental no grave. NÃO é um dicionário curado: algumas formações podem não ser as "usuais" do cavaquinista → falta permitir escolher/salvar a posição preferida por acorde.
+Editor foi enxugado: botão Jogar em destaque, ferramentas raras dentro de "Ferramentas de edição".
+Próximo: detector ao vivo (mic) + pontuação por tempo/acerto sobre a pista; calibração de latência.
 Pendente: destacar trechos onde áudio e vídeo discordam.
 
 ## Módulos (histórico)
