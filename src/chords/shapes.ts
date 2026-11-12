@@ -28,36 +28,124 @@ function toneSets(root: number, typeId: string): { required: Set<number>; allowe
   return { required, allowed };
 }
 
-/** Dedos para uma combinação de casas, ou null se precisar de mais de 4 dedos. */
+/**
+ * Dedos para uma combinação de casas, ou null se precisar de mais de 4 dedos.
+ * Como nos diagramas de cavaquinho: um dedo por nota, numerados da casa mais baixa para a mais alta;
+ * pestana (mesmo dedo em várias cordas) só quando faltariam dedos.
+ */
 function assignFingers(frets: number[]): number[] | null {
-  const fretted = frets.map((f, s) => ({ f, s })).filter((x) => x.f > 0);
-  if (fretted.length === 0) return frets.map(() => 0);
+  const fretted = frets.map((f, s) => ({ f, s })).filter((x) => x.f > 0).sort((x, y) => x.f - y.f || x.s - y.s);
   const fingers = frets.map(() => 0);
-  const lowest = Math.min(...fretted.map((x) => x.f));
-  const groups = [...new Set(fretted.map((x) => x.f))].sort((a, b) => a - b);
-  let next = 1;
-  for (const f of groups) {
-    const g = fretted.filter((x) => x.f === f);
-    const contiguous = g.length >= 2 && g[g.length - 1]!.s - g[0]!.s === g.length - 1;
-    if (f === lowest && contiguous) {
-      for (const x of g) fingers[x.s] = next;
-      next++;
-    } else {
-      for (const x of g) fingers[x.s] = next++;
-    }
+  if (fretted.length <= 4) {
+    fretted.forEach((x, i) => (fingers[x.s] = i + 1));
+    return fingers;
   }
-  return next - 1 <= 4 ? fingers : null;
+  return null;
 }
 
-/** Verifica uma formação: toda nota pertence ao acorde e as notas essenciais estão presentes. */
+/**
+ * Verifica uma formação: toda nota pertence ao acorde e as notas que definem o acorde estão presentes.
+ * - Tríades: fundamental, terça (ou quarta) e quinta, todas.
+ * - Acordes de 4+ notas: a terça e a sétima/sexta/nona são obrigatórias; a quinta justa pode faltar;
+ *   a fundamental pode faltar só se todas as outras notas estiverem lá (forma "sem fundamental", comum no cavaquinho, ex.: B7 = 4-2-4-4).
+ */
 export function validateShape(frets: number[], root: number, typeId: string, tuningId?: string): boolean {
   const open = getTuning(tuningId ?? 're-sol-si-re').strings.map((s) => s.midi);
-  if (frets.length !== open.length) return false;
-  const { required, allowed } = toneSets(root, typeId);
+  if (frets.length !== open.length || frets.some((f) => !Number.isInteger(f) || f < 0 || f > 24)) return false;
+  const type = CHORD_TYPES.find((t) => t.id === typeId);
+  if (!type) return false;
+  const tones = type.intervals.map((i) => (root + i) % 12);
   const pcs = frets.map((f, i) => ((open[i] as number) + f) % 12);
-  if (!pcs.every((p) => allowed.has(p))) return false;
-  for (const r of required) if (!pcs.includes(r)) return false;
-  return true;
+  if (!pcs.every((p) => tones.includes(p))) return false;
+  if (type.intervals.length <= 3) return tones.every((t) => pcs.includes(t));
+  const fifth = type.intervals.includes(7) ? (root + 7) % 12 : -1;
+  const essentials = tones.filter((t) => t !== root && t !== fifth);
+  if (!essentials.every((t) => pcs.includes(t))) return false;
+  return pcs.includes(root) || tones.filter((t) => t !== root).every((t) => pcs.includes(t));
+}
+
+/**
+ * Formas padrão do cavaquinho (afinação D G B D), como aparecem nos métodos e videoaulas: formas FECHADAS e móveis.
+ * Cada forma é dada para uma fundamental de referência e deslizada pelo braço para as outras notas.
+ * Conferidas com os diagramas da aula do Cicinho do Cavaco: G 5-4-3-5 · F#m 4-2-2-4 · B7 4-2-4-4 · Em7 2-0-0-0 · Dm 3-2-3-3 · G7 3-4-3-5.
+ * Nenhuma forma é usada sem passar por `validateShape` (as notas são conferidas contra o acorde).
+ */
+const FORMS: Record<string, Array<{ frets: number[]; root: number }>> = {
+  maj: [
+    { frets: [3, 2, 1, 3], root: 5 }, // forma de Fá: F A C F → G = 5-4-3-5
+    { frets: [2, 0, 1, 2], root: 0 }, // forma de Dó: E G C E → D = 4-2-3-4
+    { frets: [2, 2, 2, 2], root: 9 }, // forma de Lá: E A C# E → B = 4-4-4-4
+  ],
+  min: [
+    { frets: [3, 2, 3, 3], root: 2 }, // forma de Ré menor: F A D F
+    { frets: [2, 2, 1, 2], root: 9 }, // forma de Lá menor: E A C E
+    { frets: [4, 2, 2, 4], root: 6 }, // forma de Fá# menor: F# A C# F#
+  ],
+  '7': [
+    { frets: [3, 4, 3, 5], root: 7 }, // forma de Sol7: F B D G
+    { frets: [2, 3, 1, 2], root: 0 }, // forma de Dó7: E Bb C E
+    { frets: [4, 2, 4, 4], root: 11 }, // forma de Si7 (sem fundamental): F# A D# F# → A7 = 2-0-2-2
+  ],
+  m7: [
+    { frets: [2, 0, 0, 0], root: 4 }, // forma de Mi menor 7: E G B D → F#m7 = 4-2-2-2
+    { frets: [5, 5, 5, 7], root: 9 }, // forma de Lá menor 7: G C E A
+    { frets: [0, 2, 1, 3], root: 2 }, // forma de Ré menor 7: D A C F
+    { frets: [2, 0, 1, 2], root: 9 }, // Lá menor 7 sem fundamental (= forma de Dó): E G C E → Bm7 = 4-2-3-4
+  ],
+  '7M': [
+    { frets: [5, 4, 3, 4], root: 7 }, // forma de Sol7M: G B D F#
+    { frets: [2, 4, 1, 2], root: 0 }, // forma de Dó7M: E B C E
+  ],
+  '6': [{ frets: [2, 2, 1, 2], root: 0 }], // forma de Dó6: E A C E → D6 = 4-4-3-4
+  m7b5: [
+    { frets: [9, 7, 6, 7], root: 11 }, // forma de Si meio-diminuto: B D F A → F#m7(b5) = 4-2-1-2
+    { frets: [0, 2, 0, 3], root: 11 }, // D A B F
+  ],
+};
+
+/** X6 tem as mesmas notas de (X−3)m7, e Xm6 as de (X−3)m7(b5): reaproveita as formas. */
+const ALIAS: Record<string, { typeId: string; shift: number }> = {
+  '6': { typeId: 'm7', shift: 9 },
+  m6: { typeId: 'm7b5', shift: 9 },
+};
+
+/** Formas exatas que valem mais que a regra geral (as do vídeo de referência e as mais consagradas). */
+const STANDARD: Record<string, number[]> = {
+  '7:maj': [5, 4, 3, 5], // G
+  '0:maj': [2, 0, 1, 2], // C
+  '4:m7': [2, 0, 0, 0], // Em7
+  '11:7': [4, 2, 4, 4], // B7
+  '9:7': [2, 0, 2, 2], // A7
+};
+
+/** Nota de "quão alto e solto" — menor é melhor. Cordas soltas pesam: no cavaquinho a forma fechada é a regra. */
+function formScore(frets: number[]): number {
+  const open = frets.filter((f) => f === 0).length;
+  return Math.max(...frets) + open * 2.5 + (open === frets.length ? 5 : 0);
+}
+
+function curatedFrets(root: number, typeId: string, tuningId: string): number[][] {
+  if (tuningId !== 're-sol-si-re') return [];
+  const alias = ALIAS[typeId];
+  // formas próprias do tipo + as do acorde "parente" de mesmas notas
+  const sources: Array<{ forms: Array<{ frets: number[]; root: number }>; target: number }> = [{ forms: FORMS[typeId] ?? [], target: root }];
+  if (alias) sources.push({ forms: FORMS[alias.typeId] ?? [], target: (root + alias.shift) % 12 });
+  const out: number[][] = [];
+  const std = STANDARD[`${root}:${typeId}`];
+  if (std && validateShape(std, root, typeId, tuningId)) out.push(std);
+  const cands: number[][] = [];
+  for (const { forms, target } of sources) {
+    for (const form of forms) {
+      const k = (target - form.root + 12) % 12;
+      for (const shift of [k, k - 12]) {
+        const frets = form.frets.map((f) => f + shift);
+        if (frets.every((f) => f >= 0 && f <= MAX_FRET) && validateShape(frets, root, typeId, tuningId)) cands.push(frets);
+      }
+    }
+  }
+  cands.sort((x, y) => formScore(x) - formScore(y));
+  for (const c of cands) if (!out.some((o) => o.join() === c.join())) out.push(c);
+  return out;
 }
 
 const cache = new Map<string, Shape[]>();
@@ -105,9 +193,17 @@ export function shapesFor(root: number, typeId: string, tuningId = 're-sol-si-re
   return out;
   };
 
-  let out = search(COMFORT_FRET);
-  if (out.length === 0) out = search(MAX_FRET);
-  out.sort((x, y) => x.cost - y.cost || x.frets.join().localeCompare(y.frets.join()));
+  let generated = search(COMFORT_FRET);
+  if (generated.length === 0) generated = search(MAX_FRET);
+  generated.sort((x, y) => x.cost - y.cost || x.frets.join().localeCompare(y.frets.join()));
+
+  // Primeiro as formas padrão do cavaquinho; depois, como opções extras, as geradas pela regra.
+  const out: Shape[] = [];
+  curatedFrets(root, typeId, tuningId).forEach((frets, i) => {
+    const fingers = assignFingers(frets);
+    if (fingers) out.push({ frets, fingers, notes: frets.map((f, s) => NOTE_NAMES[((open[s] as number) + f) % 12] as string), cost: -100 + i });
+  });
+  for (const g of generated) if (!out.some((o) => o.frets.join() === g.frets.join())) out.push(g);
   cache.set(key, out);
   return out;
 }
@@ -116,10 +212,13 @@ export function bestShape(root: number, typeId: string, tuningId?: string): Shap
   return shapesFor(root, typeId, tuningId)[0] ?? null;
 }
 
+/** Quantas casas o diagrama mostra (5 a partir da pestana, como nas videoaulas). */
+export const DIAGRAM_FRETS = 5;
+
 /** Casa inicial da janela do diagrama e se mostra a pestana "pestana/nut". */
 export function diagramWindow(shape: Shape): { base: number; nut: boolean } {
   const fretted = shape.frets.filter((f) => f > 0);
-  if (fretted.length === 0 || Math.max(...fretted) <= 4) return { base: 1, nut: true };
+  if (fretted.length === 0 || Math.max(...fretted) <= DIAGRAM_FRETS) return { base: 1, nut: true };
   return { base: Math.min(...fretted), nut: false };
 }
 

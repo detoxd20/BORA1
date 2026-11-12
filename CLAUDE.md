@@ -38,6 +38,11 @@ altura = duração; uma matiz por nota fundamental; palhetadas detectadas aparec
 (sem re-render por quadro). `src/chords/shapes.ts` GERA as formações no braço (D G B D) por regra e `validateShape` confere cada nota (teste cobre os 144 acordes); custo prefere casas baixas, poucos dedos,
 cordas soltas, quinta presente, fundamental no grave. NÃO é um dicionário curado: algumas formações podem não ser as "usuais" do cavaquinista → falta permitir escolher/salvar a posição preferida por acorde.
 Editor foi enxugado: botão Jogar em destaque, ferramentas raras dentro de "Ferramentas de edição".
+FORMAS — correção importante: o gerador por regra preferia cordas soltas (G = 0-0-0-0, G7 = 0-0-0-3) e o dono rejeitou ("tudo errado"): no cavaquinho usam-se formas FECHADAS e móveis.
+Agora `shapes.ts` tem `FORMS` (formas padrão móveis por tipo: maj F/C/A, min Dm/Am/F#m, 7 G7/C7/B7-sem-fundamental, m7, 7M, m7b5, 6) + `STANDARD` (exatas) + `ALIAS` (6≡m7, m6≡m7b5), ordenadas por
+`formScore` (casa mais alta + peso p/ cordas soltas); o gerador só completa as opções. Referência validada por teste: diagramas da aula do Cicinho (G 5-4-3-5, F#m 4-2-2-4, B7 4-2-4-4, Em7 2-0-0-0,
+Dm 3-2-3-3, G7 3-4-3-5), inclusive a numeração dos dedos (um dedo por nota, da casa mais baixa p/ a mais alta). `validateShape` aceita forma sem fundamental em acordes de 4+ notas se as demais notas estão.
+Diagrama: 5 casas a partir da pestana. NÃO voltar a escolher padrão por "mais fácil".
 Formas preferidas (feito): `ShapePicker` (botão "🎸 Formas") lista os acordes da música com até 8 formas; a escolha vai para `SongMeta.shapes` e vira padrão global (`storage/shapePrefs.ts`);
 `resolveShape` ignora preferência inválida (nunca mostra diagrama errado). Engasgo nas trocas: cartas da pista NÃO mudam de estilo ao trocar de acorde (evita re-rasterizar a pista), sem backdrop-filter,
 janela de cartas recalculada 1×/s; medição no desktop com CPU 4× mais lenta: pior quadro 33→16,8 ms. Efeito no Android real não confirmado.
