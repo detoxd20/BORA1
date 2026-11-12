@@ -87,3 +87,36 @@ describe('moveStart', () => {
     expect(moveStart(song, 1, 99)[1]!.start).toBeCloseTo(3.9);
   });
 });
+
+import { insertChord, moveEnd } from '../src/songs/edit';
+describe('insertChord', () => {
+  it('dentro de um acorde: o novo fica com o resto, o anterior termina ali', () => {
+    const r = insertChord(song, 3);
+    expect(r.events.map((x) => [x.name, x.start, x.end])).toEqual([['C', 0, 2], ['F#', 2, 3], ['F#', 3, 4], ['G7', 4, 6], ['C', 6, 8]]);
+    expect(r.index).toBe(2);
+  });
+  it('repartir um intervalo em sequência cobre tudo sem buraco', () => {
+    let s = [e(0, 8, 'C', 0)];
+    s = insertChord(s, 2).events;
+    s = insertChord(s, 5).events;
+    expect(s.map((x) => [x.start, x.end])).toEqual([[0, 2], [2, 5], [5, 8]]);
+  });
+  it('em lacuna (silêncio): vai até o próximo acorde, no máximo 2 s', () => {
+    const g = [e(0, 2, 'C', 0), e(10, 12, 'G7', 7, '7')];
+    expect(insertChord(g, 4).events[1]).toMatchObject({ start: 4, end: 6 });
+    expect(insertChord(g, 9).events[1]).toMatchObject({ start: 9, end: 10 });
+  });
+  it('no começo exato de um acorde, edita o próprio (sem pedaço minúsculo)', () => {
+    const r = insertChord(song, 2.05);
+    expect(r.events).toHaveLength(4);
+    expect(r.index).toBe(1);
+  });
+});
+
+describe('moveEnd', () => {
+  it('move o fim e o próximo acompanha', () => {
+    const r = moveEnd(song, 1, 3.5);
+    expect(r[1]!.end).toBe(3.5);
+    expect(r[2]!.start).toBe(3.5);
+  });
+});
