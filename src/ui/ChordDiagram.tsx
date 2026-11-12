@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { bestShape, diagramWindow } from '../chords/shapes';
+import { diagramWindow, resolveShape } from '../chords/shapes';
 
 interface Props {
   root: number;
@@ -9,6 +9,8 @@ interface Props {
   /** Escreve o nome da nota embaixo de cada corda. */
   showNotes?: boolean;
   color?: string;
+  /** Forma escolhida pelo usuário (casas por corda). Sem isso, usa a melhor pela regra. */
+  frets?: number[];
 }
 
 const XS = [18, 39, 61, 82]; // 4ª corda (grave) … 1ª corda (aguda), da esquerda para a direita
@@ -17,14 +19,14 @@ const FRET_H = 22;
 const FRETS = 4;
 
 /** Formação do acorde no braço do cavaquinho (D G B D), calculada e validada no código. */
-export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 120, showNotes = true, color = '#f5a524' }: Props) {
-  const shape = bestShape(root, typeId);
+export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 120, showNotes = true, color = '#f5a524', frets }: Props) {
+  const shape = resolveShape(root, typeId, frets);
   if (!shape) return null;
   const { base, nut } = diagramWindow(shape);
   const bottom = TOP + FRET_H * FRETS;
   const vh = showNotes ? 134 : 122;
   return (
-    <svg viewBox={`0 0 100 ${vh}`} height={height} width={(height * 100) / vh} role="img" aria-label={`Formação: casas ${shape.frets.join(', ')}`}>
+    <svg viewBox={`${nut ? 0 : -16} 0 ${nut ? 100 : 116} ${vh}`} height={height} width={(height * (nut ? 100 : 116)) / vh} role="img" aria-label={`Formação: casas ${shape.frets.join(', ')}`}>
       {/* casas */}
       {Array.from({ length: FRETS + 1 }, (_, i) => (
         <line key={i} x1={XS[0]} x2={XS[3]} y1={TOP + i * FRET_H} y2={TOP + i * FRET_H} stroke="#8a95a3" strokeWidth={i === 0 && nut ? 4 : 1.2} />
@@ -34,7 +36,7 @@ export const ChordDiagram = memo(function ChordDiagram({ root, typeId, height = 
         <line key={i} x1={x} x2={x} y1={TOP} y2={bottom} stroke="#c9d1db" strokeWidth={1.4} />
       ))}
       {!nut && (
-        <text x={4} y={TOP + FRET_H * 0.7} fontSize={11} fill="#c9d1db" fontWeight={700}>
+        <text x={-14} y={TOP + FRET_H * 0.7} fontSize={12} fill="#c9d1db" fontWeight={700}>
           {base}ª
         </text>
       )}

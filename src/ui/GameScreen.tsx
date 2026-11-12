@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SongMeta } from '../storage/library';
 import { activeIndex } from '../songs/types';
 import { ChordDiagram, chordHue } from './ChordDiagram';
+import { shapeKey } from '../chords/shapes';
+import { loadShapePrefs } from '../storage/shapePrefs';
+import { useWakeLock } from './useWakeLock';
 
 interface Props {
   song: SongMeta;
@@ -20,6 +23,11 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
   const onsets = useMemo(() => song.onsets ?? [], [song.onsets]);
   const maxStrength = useMemo(() => Math.max(1e-6, ...onsets.map((o) => o.strength)), [onsets]);
 
+  // Forma de cada acorde: a escolhida nesta música, senão o padrão do usuário, senão a melhor pela regra
+  const prefs = useMemo(() => ({ ...loadShapePrefs(), ...(song.shapes ?? {}) }), [song.shapes]);
+  const fretsOf = (root: number, typeId: string) => prefs[shapeKey(root, typeId)];
+  useWakeLock(true);
+
   const media = useRef<HTMLMediaElement>(null);
   const lane = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -32,7 +40,7 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
   const [ended, setEnded] = useState(false);
   const [rate, setRate] = useState(1);
   const [cur, setCur] = useState(-1);
-  const [tick, setTick] = useState(0); // muda a cada 0,5 s: decide quais cartas existem na tela
+  const [tick, setTick] = useState(0); // muda a cada 1 s: decide quais cartas existem na tela
   const [laneH, setLaneH] = useState(600);
 
   const hitY = laneH * HIT_FRAC;
@@ -61,13 +69,13 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
       if (m) {
         const t = m.currentTime;
         const h = geom.current.h * HIT_FRAC;
-        if (track.current) track.current.style.transform = `translateY(${h + t * (h / LOOKAHEAD)}px)`;
+        if (track.current) track.current.style.transform = `translate3d(0, ${h + t * (h / LOOKAHEAD)}px, 0)`;
         const i = activeIndex(events, t);
         if (i !== lastCur) {
           lastCur = i;
           setCur(i);
         }
-        const tk = Math.floor(t * 2);
+        const tk = Math.floor(t);
         if (tk !== lastTick) {
           lastTick = tk;
           setTick(tk);
@@ -106,13 +114,18 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
     if (media.current) media.current.playbackRate = next;
   };
 
-  const t = tick / 2;
-  const visible = events
-    .map((e, i) => ({ e, i }))
-    .filter(({ e }) => e.end > t - 2.5 && e.start < t + LOOKAHEAD + 1.5);
-  const visibleOnsets = onsets.filter((o) => o.t > t - 1.5 && o.t < t + LOOKAHEAD + 1);
-  const seconds: number[] = [];
-  for (let s = Math.floor(t - 2); s <= Math.ceil(t + LOOKAHEAD + 2); s++) if (s >= 0) seconds.push(s);
+  // Só recalcula quais cartas existem 1×/s (com folga), e NUNCA muda o estilo de uma carta já desenhada:
+  // mexer nas cartas a cada troca de acorde obrigava o celular a redesenhar a pista inteira (engasgo).
+  const { visible, visibleOnsets, seconds } = useMemo(() => {
+    const t = tick;
+    const secs: number[] = [];
+    for (let s = Math.floor(t - 3); s <= Math.ceil(t + LOOKAHEAD + 3); s++) if (s >= 0) secs.push(s);
+    return {
+      visible: events.map((e, i) => ({ e, i })).filter(({ e }) => e.end > t - 3.5 && e.start < t + LOOKAHEAD + 3),
+      visibleOnsets: onsets.filter((o) => o.t > t - 2.5 && o.t < t + LOOKAHEAD + 2.5),
+      seconds: secs,
+    };
+  }, [tick, events, onsets]);
 
   const now = cur >= 0 ? events[cur] : undefined;
   const next = events[cur >= 0 ? cur + 1 : 0];
@@ -142,7 +155,7 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
           {now ? (
             <div className="hud-row" style={{ ['--c' as string]: `hsl(${chordHue(now.root)} 85% 62%)` }}>
               <span className="hud-name">{now.name}</span>
-              <ChordDiagram root={now.root} typeId={now.typeId} height={128} color={`hsl(${chordHue(now.root)} 85% 62%)`} />
+              <ChordDiagram root={now.root} typeId={now.typeId} frets={fretsOf(now.root, now.typeId)} height={128} color={`hsl(${chordHue(now.root)} 85% 62%)`} />
             </div>
           ) : (
             <div className="hud-row"><span className="hud-name dim">—</span></div>
@@ -153,7 +166,7 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
           {next ? (
             <div className="hud-row">
               <span className="hud-name sm">{next.name}</span>
-              <ChordDiagram root={next.root} typeId={next.typeId} height={84} color={`hsl(${chordHue(next.root)} 85% 62%)`} />
+              <ChordDiagram root={next.root} typeId={next.typeId} frets={fretsOf(next.root, next.typeId)} height={84} color={`hsl(${chordHue(next.root)} 85% 62%)`} />
             </div>
           ) : (
             <div className="hud-row"><span className="hud-name sm dim">fim</span></div>
@@ -177,16 +190,17 @@ export function GameScreen({ song, url, audioOnly, onClose }: Props) {
             return (
               <div
                 key={`${e.start}-${i}`}
-                className={`gcard ${i === cur ? 'on' : ''} ${i < cur ? 'past' : ''}`}
+                className="gcard"
                 style={{ top: -e.start * pps - h, height: h, ['--c' as string]: c, ['--bg' as string]: `hsl(${hue} 60% 22%)` }}
               >
                 <span className="gcard-name" style={{ fontSize: h < 64 ? 24 : 34 }}>{e.name}</span>
-                {h >= 56 && <ChordDiagram root={e.root} typeId={e.typeId} height={Math.min(h - 10, 124)} showNotes={h >= 100} color={c} />}
+                {h >= 56 && <ChordDiagram root={e.root} typeId={e.typeId} frets={fretsOf(e.root, e.typeId)} height={Math.min(h - 10, 124)} showNotes={h >= 100} color={c} />}
               </div>
             );
           })}
         </div>
-        <div className="hit-line" style={{ top: hitY }}>
+        <div className="past-shade" style={{ top: hitY }} />
+        <div className="hit-line" style={{ top: hitY, ['--c' as string]: now ? `hsl(${chordHue(now.root)} 85% 62%)` : 'var(--accent)' }}>
           <span>ACERTE AQUI</span>
         </div>
       </div>

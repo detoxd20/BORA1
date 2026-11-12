@@ -27,6 +27,8 @@ export interface SongMeta {
   onsets?: Onset[];
   /** Veio de um backup: os acordes existem, mas falta escolher de novo o arquivo de vídeo. */
   needsFile?: boolean;
+  /** Forma (casas por corda) escolhida para cada acorde desta música. Chave "root:typeId". */
+  shapes?: Record<string, number[]>;
 }
 
 const DB = 'cavaco';
