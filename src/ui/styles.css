@@ -183,3 +183,7 @@ input[type=range] { width: 100%; height: 40px; accent-color: var(--accent); }
 .lib-name { font-size: 18px; font-weight: 700; word-break: break-word; }
 .timeline { position: relative; }
 .chip.on { border-color: var(--accent); }
+.picker { position: relative; touch-action: none; border-radius: 10px; overflow: hidden; background: #000; }
+.picker canvas { display: block; width: 100%; height: auto; }
+.picker-rect { position: absolute; border: 2px solid var(--accent); background: rgba(245, 165, 36, .18); pointer-events: none; }
+.chip.accent { border-color: var(--accent); color: var(--accent); }

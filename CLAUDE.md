@@ -13,6 +13,12 @@ Ordem: (1) motor de acordes ✅ · (1b) carregar arquivo + análise automática 
 linha do tempo (ajuste fino) · (4) pista estilo Guitar Hero + pontuação/timing + calibração de latência · (5) biblioteca/PWA ·
 (6) batidas · (7) afinador (feito na v0.1, polir por último). Fones são recomendados: o som do vídeo vaza no microfone.
 
+### Leitura dos acordes escritos no vídeo (feito)
+Usuário marca o retângulo dos nomes (ex.: faixa superior da aula "Cacinho do cavaco"); OCR local (tesseract.js, ~15 MB em `public/ocr/`,
+copiado por `scripts/copy-ocr.mjs` no predev/prebuild, fora do precache) lê 1 quadro/s → `Observation[]` → `buildVocabulary` (trechos, confirma
+2 leituras iguais) → `analyzeChords({vocabulary})` restringe o Viterbi a esses acordes (fora da lista = "sem acorde").
+Pendente: refinar o instante exato das trocas (hoje pode adiantar até ~0,5 s) com detecção de onsets; destacar trechos onde áudio e vídeo discordam.
+
 ## Módulos (histórico)
 1. Afinador ✅ (v0.1)
 2. Detector de acordes (motor de áudio)
